@@ -194,20 +194,32 @@ class AdLoopWidget(QWidget):
                     videos = [fb]
                     break
 
-        if videos and self._init_player():
-            self.playlist.clear()
-            for v in videos:
-                self.playlist.addMedia(QMediaContent(QUrl.fromLocalFile(str(v))))
-            # Delay playback until after the event loop starts
-            QTimer.singleShot(500, self._try_play)
+        if videos:
+            # Store paths and defer ALL player creation + playback to after event loop
+            self._pending_videos = videos
+            log_debug(f"[AD] {len(videos)} video(s) found, deferring player init")
+            QTimer.singleShot(1000, self._deferred_init_and_play)
         else:
+            log_debug("[AD] No videos found, showing static fallback")
             self._show_static_fallback()
 
-    def _try_play(self):
-        """Start playback after the event loop is running."""
+    def _deferred_init_and_play(self):
+        """Create video player and start playback after event loop is running."""
+        videos = getattr(self, '_pending_videos', None)
+        if not videos:
+            self._show_static_fallback()
+            return
+
+        if not self._init_player():
+            self._show_static_fallback()
+            return
+
+        log_debug("[AD] Player initialized, starting playback")
+        self.playlist.clear()
+        for v in videos:
+            self.playlist.addMedia(QMediaContent(QUrl.fromLocalFile(str(v))))
         try:
-            if self.player and self.playlist and self.playlist.mediaCount() > 0:
-                self.player.play()
+            self.player.play()
         except Exception as e:
             log_debug(f"[AD] Playback failed: {e}")
             self._show_static_fallback()
@@ -964,6 +976,10 @@ QPushButton:hover {
 # ------------------------------------------------------
 
 if __name__ == "__main__":
+    # Enable native crash diagnostics (segfault stack traces)
+    import faulthandler
+    faulthandler.enable()
+
     # Force portrait BEFORE Qt starts so QApplication sees correct geometry
     try:
         force_portrait()
@@ -986,6 +1002,12 @@ if __name__ == "__main__":
     # Exit is handled explicitly via PIN code or relaunch button.
     app.setQuitOnLastWindowClosed(False)
 
+    # Log whenever the app is about to quit so we can trace unexpected exits
+    app.aboutToQuit.connect(lambda: log_debug("[APP] aboutToQuit signal fired"))
+
     window = VerticalMultiWindow()
     window.showFullScreen()
-    sys.exit(app.exec_())
+    log_debug("[APP] Event loop starting")
+    exit_code = app.exec_()
+    log_debug(f"[APP] Event loop exited with code {exit_code}")
+    sys.exit(exit_code)
