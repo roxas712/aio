@@ -148,50 +148,83 @@ class AdLoopWidget(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
 
-        self.video_widget = QVideoWidget(self)
-        self._layout.addWidget(self.video_widget)
-
-        self.player = QMediaPlayer(self)
-        self.playlist = QMediaPlaylist(self)
-        self.player.setVideoOutput(self.video_widget)
-        self.player.setPlaylist(self.playlist)
-        self.playlist.setPlaybackMode(QMediaPlaylist.Loop)
-        self.player.setVolume(100)
-
-        # Handle media player errors gracefully (e.g. no audio hardware on VMs)
-        self.player.error.connect(self._on_player_error)
-
-        # Fallback label (hidden by default)
+        # Video player is created lazily — only when we have videos to play.
+        # This avoids DirectShow/Mesa crashes on VMs with no audio/video hardware.
+        self.video_widget = None
+        self.player = None
+        self.playlist = None
         self._fallback_label = None
+        self._volume = 100
+
+    def _init_player(self):
+        """Create the video player on demand. Returns True on success."""
+        if self.player is not None:
+            return True
+        try:
+            self.video_widget = QVideoWidget(self)
+            self._layout.addWidget(self.video_widget)
+
+            self.player = QMediaPlayer(self)
+            self.playlist = QMediaPlaylist(self)
+            self.player.setVideoOutput(self.video_widget)
+            self.player.setPlaylist(self.playlist)
+            self.playlist.setPlaybackMode(QMediaPlaylist.Loop)
+            self.player.setVolume(self._volume)
+            self.player.error.connect(self._on_player_error)
+            return True
+        except Exception as e:
+            log_debug(f"[AD] Failed to init video player: {e}")
+            return False
 
     def load_ads(self, folder_path: Path):
         # Create folder if missing
         folder_path.mkdir(parents=True, exist_ok=True)
 
-        self.playlist.clear()
-
-        for file in sorted(folder_path.glob("*.mp4")):
-            self.playlist.addMedia(QMediaContent(QUrl.fromLocalFile(str(file))))
+        # Collect video files
+        videos = list(sorted(folder_path.glob("*.mp4")))
 
         # Fallback: try bundled videos
-        if self.playlist.mediaCount() == 0:
+        if not videos:
             fallback_paths = [
                 AIO_ROOT / "kiosk" / "vids" / "AIO_upper-loop.mp4",
                 PROGRAMDATA_ROOT / "vids" / "AIO_upper-loop.mp4",
             ]
             for fb in fallback_paths:
                 if fb.exists():
-                    self.playlist.addMedia(QMediaContent(QUrl.fromLocalFile(str(fb))))
+                    videos = [fb]
                     break
 
-        if self.playlist.mediaCount() > 0:
-            self.player.play()
+        if videos and self._init_player():
+            self.playlist.clear()
+            for v in videos:
+                self.playlist.addMedia(QMediaContent(QUrl.fromLocalFile(str(v))))
+            # Delay playback until after the event loop starts
+            QTimer.singleShot(500, self._try_play)
         else:
             self._show_static_fallback()
 
+    def _try_play(self):
+        """Start playback after the event loop is running."""
+        try:
+            if self.player and self.playlist and self.playlist.mediaCount() > 0:
+                self.player.play()
+        except Exception as e:
+            log_debug(f"[AD] Playback failed: {e}")
+            self._show_static_fallback()
+
     def _show_static_fallback(self):
-        """Show branded image when no videos are available."""
-        self.video_widget.hide()
+        """Show branded image when no videos are available or playback fails."""
+        if self._fallback_label:
+            return  # Already showing fallback
+
+        # Stop and dispose of player if it exists
+        if self.player:
+            try:
+                self.player.stop()
+            except Exception:
+                pass
+        if self.video_widget:
+            self.video_widget.hide()
 
         self._fallback_label = QLabel(self)
         self._fallback_label.setAlignment(Qt.AlignCenter)
@@ -216,18 +249,25 @@ class AdLoopWidget(QWidget):
     def _on_player_error(self, error):
         """Handle media player errors without crashing the app."""
         log_debug(f"[AD] Media player error {error}: {self.player.errorString()}")
-        # If playback fails completely, show static fallback
-        if self.playlist.mediaCount() == 0 or error == QMediaPlayer.ResourceError:
-            self._show_static_fallback()
+        # Stop the player immediately to prevent further DirectShow processing
+        try:
+            self.player.stop()
+        except Exception:
+            pass
+        self._show_static_fallback()
 
     def set_volume(self, vol):
-        self.player.setVolume(vol)
+        self._volume = vol
+        if self.player:
+            self.player.setVolume(vol)
 
     def pause(self):
-        self.player.pause()
+        if self.player:
+            self.player.pause()
 
     def resume(self):
-        self.player.play()
+        if self.player:
+            self.player.play()
 
 
 # ------------------------------------------------------
