@@ -160,6 +160,17 @@ class AdLoopWidget(QWidget):
         """Create the video player on demand. Returns True on success."""
         if self.player is not None:
             return True
+
+        # Pre-flight: check for audio hardware via Win32 API.
+        # DirectShow crashes with a C++ stack overflow if no audio device exists.
+        try:
+            num_audio = ctypes.windll.winmm.waveOutGetNumDevs()
+            if num_audio == 0:
+                log_debug("[AD] No audio output devices detected, skipping video player")
+                return False
+        except Exception:
+            pass
+
         try:
             self.video_widget = QVideoWidget(self)
             self._layout.addWidget(self.video_widget)
