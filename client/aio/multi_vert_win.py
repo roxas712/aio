@@ -229,14 +229,10 @@ class AdLoopWidget(QWidget):
         if self._fallback_label:
             return  # Already showing fallback
 
-        # Disconnect error signal before stopping to prevent recursion
+        # Disconnect error signal; do NOT call stop() (causes C++ stack overflow)
         if self.player:
             try:
                 self.player.error.disconnect(self._on_player_error)
-            except Exception:
-                pass
-            try:
-                self.player.stop()
             except Exception:
                 pass
         if self.video_widget:
@@ -265,17 +261,15 @@ class AdLoopWidget(QWidget):
     def _on_player_error(self, error):
         """Handle media player errors without crashing the app."""
         if getattr(self, '_handling_error', False):
-            return  # Prevent re-entry (stop() can re-trigger error signal)
+            return
         self._handling_error = True
         log_debug(f"[AD] Media player error {error}: {self.player.errorString()}")
         try:
             self.player.error.disconnect(self._on_player_error)
         except Exception:
             pass
-        try:
-            self.player.stop()
-        except Exception:
-            pass
+        # Do NOT call player.stop() here — it re-enters via DirectShow
+        # at the C++ level causing a stack overflow. Just show fallback.
         self._show_static_fallback()
 
     def set_volume(self, vol):
