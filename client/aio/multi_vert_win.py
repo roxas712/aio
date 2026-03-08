@@ -408,6 +408,7 @@ class VerticalMultiWindow(MainWindow):
     def __init__(self):
         self.ad_overlay = None
         self._game_pid = None
+        self._volume_btn = None
         super().__init__()
 
         # Register vertical shell PID for watchdog
