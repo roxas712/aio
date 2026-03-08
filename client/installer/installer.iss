@@ -73,6 +73,9 @@ Source: "C:\AIOv2\kiosk\multi_win.py";       DestDir: "{app}\kiosk"; Flags: igno
 Source: "C:\AIOv2\kiosk\single_win.py";      DestDir: "{app}\kiosk"; Flags: ignoreversion
 Source: "C:\AIOv2\kiosk\return.py";          DestDir: "{app}\kiosk"; Flags: ignoreversion
 Source: "C:\AIOv2\kiosk\loading.py";         DestDir: "{app}\kiosk"; Flags: ignoreversion
+Source: "C:\AIOv2\kiosk\multi_vert_win.py"; DestDir: "{app}\kiosk"; Flags: ignoreversion
+Source: "C:\AIOv2\kiosk\loading_vert.py";   DestDir: "{app}\kiosk"; Flags: ignoreversion
+Source: "C:\AIOv2\kiosk\return_vert.py";    DestDir: "{app}\kiosk"; Flags: ignoreversion
 
 ; --- Images / assets ---
 Source: "C:\AIOv2\kiosk\img\*";  DestDir: "{app}\kiosk\img"; Flags: ignoreversion recursesubdirs createallsubdirs

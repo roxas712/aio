@@ -512,6 +512,8 @@ QPushButton:hover {
 
     def _position_volume_button(self):
         """Position volume button in upper-right of ad area."""
+        if not hasattr(self, '_volume_btn') or not self._volume_btn:
+            return
         screen_w = self.width() or 1080
         ad_height = int((self.height() or 1920) * AD_RATIO)
         self._volume_btn.move(screen_w - 80, ad_height - 80)
