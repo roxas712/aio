@@ -158,6 +158,9 @@ class AdLoopWidget(QWidget):
         self.playlist.setPlaybackMode(QMediaPlaylist.Loop)
         self.player.setVolume(100)
 
+        # Handle media player errors gracefully (e.g. no audio hardware on VMs)
+        self.player.error.connect(self._on_player_error)
+
         # Fallback label (hidden by default)
         self._fallback_label = None
 
@@ -209,6 +212,13 @@ class AdLoopWidget(QWidget):
             )
 
         self._layout.addWidget(self._fallback_label)
+
+    def _on_player_error(self, error):
+        """Handle media player errors without crashing the app."""
+        log_debug(f"[AD] Media player error {error}: {self.player.errorString()}")
+        # If playback fails completely, show static fallback
+        if self.playlist.mediaCount() == 0 or error == QMediaPlayer.ResourceError:
+            self._show_static_fallback()
 
     def set_volume(self, vol):
         self.player.setVolume(vol)
@@ -363,6 +373,11 @@ class VerticalMultiWindow(MainWindow):
         except Exception:
             pass
 
+        # Remove the fixed size constraint set by MainWindow.__init__
+        # so the window can properly resize for portrait display
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)  # QWIDGETSIZE_MAX
+
         # Store reference to original multi UI root
         self._multi_root = self.centralWidget()
         self._multi_root.setParent(self)
@@ -422,6 +437,15 @@ QPushButton:hover {
                 self.stack.currentChanged.connect(self._enforce_bottom_layout)
         except Exception:
             pass
+
+    def closeEvent(self, event):
+        """Block unexpected window closure. Exit only via explicit app.quit()."""
+        app = QApplication.instance()
+        if app and not app.closingDown():
+            log_debug("[VERT] closeEvent blocked (unexpected close)")
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _replace_carousel_for_vertical(self):
         """Replace the inherited landscape carousel with a vertical-sized one."""
@@ -918,16 +942,10 @@ if __name__ == "__main__":
     QApplication.setAttribute(_Qt.AA_DisableHighDpiScaling, True)
 
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(True)
+    # Do NOT quit when the window is briefly hidden during init/resize.
+    # Exit is handled explicitly via PIN code or relaunch button.
+    app.setQuitOnLastWindowClosed(False)
 
-    print("[DEBUG] Creating VerticalMultiWindow...")
     window = VerticalMultiWindow()
-    print(f"[DEBUG] Window created. size={window.size().width()}x{window.size().height()}")
-    print(f"[DEBUG] Games loaded: {len(window.games) if hasattr(window, 'games') else 'N/A'}")
-    print(f"[DEBUG] isVisible={window.isVisible()}, isFullScreen={window.isFullScreen()}")
     window.showFullScreen()
-    print(f"[DEBUG] After showFullScreen: isVisible={window.isVisible()}, geometry={window.geometry()}")
-    print("[DEBUG] Entering event loop...")
-    exit_code = app.exec_()
-    print(f"[DEBUG] Event loop exited with code {exit_code}")
-    sys.exit(exit_code)
+    sys.exit(app.exec_())
