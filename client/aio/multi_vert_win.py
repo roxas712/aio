@@ -352,6 +352,7 @@ class VerticalMultiWindow(MainWindow):
         self.ad_overlay = None
         self._game_pid = None
         self._volume_btn = None
+        self._multi_root = None
         super().__init__()
 
         # Register vertical shell PID for watchdog
@@ -481,7 +482,7 @@ QPushButton:hover {
             self._secret_btn.raise_()
 
     def _update_ad_geometry(self):
-        if not self.ad_overlay:
+        if not self.ad_overlay or not self._multi_root:
             return
 
         screen_w = self.width()
