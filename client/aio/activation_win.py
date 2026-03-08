@@ -40,6 +40,8 @@ from win_common import (
     get_client_uuid,
     get_game_library,
     save_games,
+    force_portrait,
+    force_landscape,
 )
 
 
@@ -499,12 +501,16 @@ class PendingActivationWindow(QWidget):
         """
         log(f"[INFO] Launching kiosk for terminal_type={terminal_type}")
         try:
-            # Decide which script to launch
-            if terminal_type == "single":
-                script_name = "single_win.py"
-            elif terminal_type == "multi_vert":
+            # Set display orientation based on terminal type
+            if terminal_type == "multi_vert":
+                log("[INFO] Setting display to portrait for vertical mode")
+                force_portrait()
                 script_name = "multi_vert_win.py"
+            elif terminal_type == "single":
+                force_landscape()
+                script_name = "single_win.py"
             else:
+                force_landscape()
                 script_name = "multi_win.py"
 
             # Prefer an overlay version of the script if present in ProgramData
@@ -555,12 +561,16 @@ def main():
             # Refresh terminal_type + selections from server and persist
             resolved_type = apply_server_config_and_persist(act)
 
-            # Launch correct kiosk UI based on server-authoritative type
-            if resolved_type == "single":
-                script_name = "single_win.py"
-            elif resolved_type == "multi_vert":
+            # Set display orientation and launch correct kiosk UI
+            if resolved_type == "multi_vert":
+                log("[INFO] Setting display to portrait for vertical mode")
+                force_portrait()
                 script_name = "multi_vert_win.py"
+            elif resolved_type == "single":
+                force_landscape()
+                script_name = "single_win.py"
             else:
+                force_landscape()
                 script_name = "multi_win.py"
 
             overlay_script = OVERLAY_KIOSK_DIR / script_name

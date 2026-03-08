@@ -414,6 +414,116 @@ def send_status_to_server(status: str) -> None:
 
 
 # ------------------------------
+# Display orientation helpers
+# ------------------------------
+
+def _get_display_orientation():
+    """
+    Get current display orientation using Win32 API.
+    Returns (orientation, width, height) or None on failure.
+    Orientation: 0=landscape, 1=portrait(left), 2=inverted, 3=portrait(right)
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL('user32', use_last_error=True)
+    ENUM_CURRENT_SETTINGS = -1
+
+    class DEVMODE(ctypes.Structure):
+        _fields_ = [
+            ("dmDeviceName", wintypes.WCHAR * 32),
+            ("dmSpecVersion", wintypes.WORD),
+            ("dmDriverVersion", wintypes.WORD),
+            ("dmSize", wintypes.WORD),
+            ("dmDriverExtra", wintypes.WORD),
+            ("dmFields", wintypes.DWORD),
+            ("dmPositionX", wintypes.LONG),
+            ("dmPositionY", wintypes.LONG),
+            ("dmDisplayOrientation", wintypes.DWORD),
+            ("dmDisplayFixedOutput", wintypes.DWORD),
+            ("dmColor", wintypes.SHORT),
+            ("dmDuplex", wintypes.SHORT),
+            ("dmYResolution", wintypes.SHORT),
+            ("dmTTOption", wintypes.SHORT),
+            ("dmCollate", wintypes.SHORT),
+            ("dmFormName", wintypes.WCHAR * 32),
+            ("dmLogPixels", wintypes.WORD),
+            ("dmBitsPerPel", wintypes.DWORD),
+            ("dmPelsWidth", wintypes.DWORD),
+            ("dmPelsHeight", wintypes.DWORD),
+            ("dmDisplayFlags", wintypes.DWORD),
+            ("dmDisplayFrequency", wintypes.DWORD),
+            ("dmICMMethod", wintypes.DWORD),
+            ("dmICMIntent", wintypes.DWORD),
+            ("dmMediaType", wintypes.DWORD),
+            ("dmDitherType", wintypes.DWORD),
+            ("dmReserved1", wintypes.DWORD),
+            ("dmReserved2", wintypes.DWORD),
+            ("dmPanningWidth", wintypes.DWORD),
+            ("dmPanningHeight", wintypes.DWORD),
+        ]
+
+    devmode = DEVMODE()
+    devmode.dmSize = ctypes.sizeof(DEVMODE)
+
+    if not user32.EnumDisplaySettingsW(None, ENUM_CURRENT_SETTINGS, ctypes.byref(devmode)):
+        return None
+
+    return devmode
+
+
+def force_display_orientation(target_orientation: int):
+    """
+    Set display orientation.
+    0 = landscape (default), 1 = portrait (rotated left),
+    2 = inverted landscape, 3 = portrait (rotated right).
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    DM_DISPLAYORIENTATION = 0x00000080
+    DM_PELSWIDTH = 0x00080000
+    DM_PELSHEIGHT = 0x00100000
+
+    devmode = _get_display_orientation()
+    if devmode is None:
+        print("[WARN] force_display_orientation: failed to read current display settings")
+        return False
+
+    current = devmode.dmDisplayOrientation
+    if current == target_orientation:
+        print(f"[INFO] Display already at orientation {target_orientation}")
+        return True
+
+    devmode.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT
+    devmode.dmDisplayOrientation = target_orientation
+
+    # Swap width/height when changing between landscape and portrait
+    needs_swap = (current in (0, 2)) != (target_orientation in (0, 2))
+    if needs_swap:
+        devmode.dmPelsWidth, devmode.dmPelsHeight = devmode.dmPelsHeight, devmode.dmPelsWidth
+
+    user32 = ctypes.WinDLL('user32', use_last_error=True)
+    result = user32.ChangeDisplaySettingsW(ctypes.byref(devmode), 0)
+    if result == 0:  # DISP_CHANGE_SUCCESSFUL
+        print(f"[INFO] Display rotated to orientation {target_orientation}")
+        return True
+    else:
+        print(f"[WARN] Display rotation failed with code {result}")
+        return False
+
+
+def force_portrait():
+    """Force primary display into portrait orientation (rotated left)."""
+    return force_display_orientation(1)
+
+
+def force_landscape():
+    """Force primary display into landscape orientation (default)."""
+    return force_display_orientation(0)
+
+
+# ------------------------------
 # Game launching helpers
 # ------------------------------
 

@@ -49,64 +49,6 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaPlaylist, QMediaContent
 from PyQt5.QtMultimediaWidgets import QVideoWidget
 
 import ctypes
-from ctypes import wintypes
-
-
-def force_windows_portrait():
-    """Force primary display into portrait orientation (rotated left)."""
-    user32 = ctypes.WinDLL('user32', use_last_error=True)
-
-    ENUM_CURRENT_SETTINGS = -1
-    DM_DISPLAYORIENTATION = 0x00000080
-    DM_PELSWIDTH = 0x00080000
-    DM_PELSHEIGHT = 0x00100000
-
-    class DEVMODE(ctypes.Structure):
-        _fields_ = [
-            ("dmDeviceName", wintypes.WCHAR * 32),
-            ("dmSpecVersion", wintypes.WORD),
-            ("dmDriverVersion", wintypes.WORD),
-            ("dmSize", wintypes.WORD),
-            ("dmDriverExtra", wintypes.WORD),
-            ("dmFields", wintypes.DWORD),
-            ("dmPositionX", wintypes.LONG),
-            ("dmPositionY", wintypes.LONG),
-            ("dmDisplayOrientation", wintypes.DWORD),
-            ("dmDisplayFixedOutput", wintypes.DWORD),
-            ("dmColor", wintypes.SHORT),
-            ("dmDuplex", wintypes.SHORT),
-            ("dmYResolution", wintypes.SHORT),
-            ("dmTTOption", wintypes.SHORT),
-            ("dmCollate", wintypes.SHORT),
-            ("dmFormName", wintypes.WCHAR * 32),
-            ("dmLogPixels", wintypes.WORD),
-            ("dmBitsPerPel", wintypes.DWORD),
-            ("dmPelsWidth", wintypes.DWORD),
-            ("dmPelsHeight", wintypes.DWORD),
-            ("dmDisplayFlags", wintypes.DWORD),
-            ("dmDisplayFrequency", wintypes.DWORD),
-            ("dmICMMethod", wintypes.DWORD),
-            ("dmICMIntent", wintypes.DWORD),
-            ("dmMediaType", wintypes.DWORD),
-            ("dmDitherType", wintypes.DWORD),
-            ("dmReserved1", wintypes.DWORD),
-            ("dmReserved2", wintypes.DWORD),
-            ("dmPanningWidth", wintypes.DWORD),
-            ("dmPanningHeight", wintypes.DWORD),
-        ]
-
-    devmode = DEVMODE()
-    devmode.dmSize = ctypes.sizeof(DEVMODE)
-
-    if not user32.EnumDisplaySettingsW(None, ENUM_CURRENT_SETTINGS, ctypes.byref(devmode)):
-        return
-
-    # Rotate left (1 = 90 degrees)
-    if devmode.dmDisplayOrientation != 1:
-        devmode.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT
-        devmode.dmDisplayOrientation = 1
-        devmode.dmPelsWidth, devmode.dmPelsHeight = devmode.dmPelsHeight, devmode.dmPelsWidth
-        user32.ChangeDisplaySettingsW(ctypes.byref(devmode), 0)
 
 
 # Reuse existing multi implementation
@@ -115,6 +57,7 @@ from win_common import (
     AIO_ROOT, PROGRAMDATA_ROOT, VERSION_FILE,
     launch_game as win_launch_game,
     get_local_ip, get_client_uuid, send_status_to_server,
+    force_portrait,
 )
 
 # --- Game PID file for vertical mode ---
@@ -424,13 +367,7 @@ class VerticalMultiWindow(MainWindow):
         self._multi_root.setParent(self)
         self._multi_root.raise_()
 
-        # Force portrait orientation on launch
-        try:
-            force_windows_portrait()
-        except Exception:
-            pass
-
-        # After rotation, re-apply fullscreen + geometry correction
+        # Re-apply fullscreen after a short delay (handles display rotation settling)
         QTimer.singleShot(500, self._reapply_fullscreen)
 
         # Force terminal type
@@ -962,6 +899,15 @@ QPushButton:hover {
 # ------------------------------------------------------
 
 if __name__ == "__main__":
+    # Force portrait BEFORE Qt starts so QApplication sees correct geometry
+    try:
+        force_portrait()
+    except Exception:
+        pass
+
+    import time
+    time.sleep(1)  # Let display settle after rotation
+
     # Basic DPI sanity for Windows
     os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
     os.environ.setdefault("QT_SCALE_FACTOR", "1")
