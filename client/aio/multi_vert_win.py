@@ -191,19 +191,11 @@ class AdLoopWidget(QWidget):
         # Create folder if missing
         folder_path.mkdir(parents=True, exist_ok=True)
 
-        # Collect video files
+        # Only play videos explicitly placed in the ads folder.
+        # Bundled fallback videos are NOT used — they crash DirectShow
+        # on systems without proper audio/video hardware (VMs, kiosks
+        # running as SYSTEM). Real deployments will have ad content here.
         videos = list(sorted(folder_path.glob("*.mp4")))
-
-        # Fallback: try bundled videos
-        if not videos:
-            fallback_paths = [
-                AIO_ROOT / "kiosk" / "vids" / "AIO_upper-loop.mp4",
-                PROGRAMDATA_ROOT / "vids" / "AIO_upper-loop.mp4",
-            ]
-            for fb in fallback_paths:
-                if fb.exists():
-                    videos = [fb]
-                    break
 
         if videos:
             # Store paths and defer ALL player creation + playback to after event loop
