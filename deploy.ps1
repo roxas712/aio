@@ -5,7 +5,7 @@
     Downloads latest files from GitHub and deploys to the installed kiosk location.
 
 .DESCRIPTION
-    - Downloads the repo archive from GitHub (no git required)
+    - Downloads the repo archive from GitHub using curl (no git required)
     - Stops AIOAgent and AIOWatchdog services
     - Copies kiosk scripts, images, videos, and agent files into place
     - Installs/updates Python dependencies
@@ -37,9 +37,12 @@ if (-not (Test-Path "C:\ProgramData\aio")) {
     New-Item -ItemType Directory -Path "C:\ProgramData\aio" -Force | Out-Null
 }
 
-# Download zip archive
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -Uri $ARCHIVE_URL -OutFile $ZIP_PATH -UseBasicParsing
+# Download zip archive using curl.exe (built into Windows 10)
+& curl.exe -L -s -o $ZIP_PATH $ARCHIVE_URL
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Failed to download archive from GitHub" -ForegroundColor Red
+    exit 1
+}
 Write-Host "       Downloaded archive"
 
 # Clear old staging and extract
