@@ -918,6 +918,16 @@ if __name__ == "__main__":
     QApplication.setAttribute(_Qt.AA_DisableHighDpiScaling, True)
 
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(True)
+
+    print("[DEBUG] Creating VerticalMultiWindow...")
     window = VerticalMultiWindow()
+    print(f"[DEBUG] Window created. size={window.size().width()}x{window.size().height()}")
+    print(f"[DEBUG] Games loaded: {len(window.games) if hasattr(window, 'games') else 'N/A'}")
+    print(f"[DEBUG] isVisible={window.isVisible()}, isFullScreen={window.isFullScreen()}")
     window.showFullScreen()
-    sys.exit(app.exec_())
+    print(f"[DEBUG] After showFullScreen: isVisible={window.isVisible()}, geometry={window.geometry()}")
+    print("[DEBUG] Entering event loop...")
+    exit_code = app.exec_()
+    print(f"[DEBUG] Event loop exited with code {exit_code}")
+    sys.exit(exit_code)
