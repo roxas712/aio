@@ -493,15 +493,17 @@ class PendingActivationWindow(QWidget):
         """
         Launch the appropriate kiosk UI based on terminal_type.
 
-        - 'multi'  -> multi_win.py
-        - 'single' -> single_win.py
-        (Additional types like 'multi_vert' can be added later.)
+        - 'single'     -> single_win.py
+        - 'multi_vert' -> multi_vert_win.py
+        - 'multi'      -> multi_win.py  (default)
         """
         log(f"[INFO] Launching kiosk for terminal_type={terminal_type}")
         try:
             # Decide which script to launch
             if terminal_type == "single":
                 script_name = "single_win.py"
+            elif terminal_type == "multi_vert":
+                script_name = "multi_vert_win.py"
             else:
                 script_name = "multi_win.py"
 
@@ -556,6 +558,8 @@ def main():
             # Launch correct kiosk UI based on server-authoritative type
             if resolved_type == "single":
                 script_name = "single_win.py"
+            elif resolved_type == "multi_vert":
+                script_name = "multi_vert_win.py"
             else:
                 script_name = "multi_win.py"
 
