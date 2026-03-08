@@ -91,10 +91,16 @@ BREATH_ANIM_MS = 2200
 # ------------------------------
 
 class CarouselWidget(QWidget):
-    def __init__(self, games, on_select, parent=None):
+    def __init__(self, games, on_select, parent=None, *,
+                 center_size=None, side_size=None,
+                 container_size=None, num_visible=5):
         super().__init__(parent)
-        # Carousel should not consume the whole screen height
-        self.setMinimumHeight(720)
+        self.center_size = center_size or CENTER_SIZE
+        self.side_size = side_size or SIDE_SIZE
+        self.num_visible = num_visible  # 3 or 5
+        cont = container_size or QSize(2200, 700)
+
+        self.setMinimumHeight(cont.height() + 20)
         self.games = games
         self.on_select = on_select
         self.index = 0
@@ -102,17 +108,14 @@ class CarouselWidget(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         layout = QHBoxLayout(self)
-        # Remove vertical margins so cards are not clipped by layout
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(20)
-        # Remove layout-based centering; we'll center manually
 
         self.card_container = QWidget(self)
         existing_layout = self.card_container.layout()
         if existing_layout is not None:
             existing_layout.deleteLater()
-        # Container height must fit cards but leave room for the button
-        self.card_container.setFixedSize(2200, 700)
+        self.card_container.setFixedSize(cont)
 
         layout.addWidget(self.card_container)
 
@@ -143,21 +146,21 @@ class CarouselWidget(QWidget):
         # Edge‑based spacing (center ↔ side ↔ outer)
         cx = self.card_container.width() // 2
         GAP = 20
-        inner = (CENTER_SIZE.width() // 2) + (SIDE_SIZE.width() // 2) + GAP
-        outer_card_w = int(SIDE_SIZE.width() * 0.75)
-        outer = inner + (SIDE_SIZE.width() // 2) + (outer_card_w // 2) + GAP
-        X_OFFSETS = {
-            -2: -outer,
-            -1: -inner,
-             0:    0,
-             1:  inner,
-             2:  outer,
-        }
+        half = self.num_visible // 2  # 2 for 5-card, 1 for 3-card
+        inner = (self.center_size.width() // 2) + (self.side_size.width() // 2) + GAP
+
+        X_OFFSETS = {0: 0, -1: -inner, 1: inner}
+        if self.num_visible >= 5:
+            outer_card_w = int(self.side_size.width() * 0.75)
+            outer = inner + (self.side_size.width() // 2) + (outer_card_w // 2) + GAP
+            X_OFFSETS[-2] = -outer
+            X_OFFSETS[2] = outer
+
         # Anchor cards to container center only (no external lift)
         cy_visual_center = self.card_container.height() // 2
 
-        for i in range(5):
-            offset = i - 2
+        for i in range(self.num_visible):
+            offset = i - half
             idx = (self.index + offset) % len(self.games)
             game = self.games[idx]
 
@@ -171,15 +174,14 @@ class CarouselWidget(QWidget):
             # No click or hover in attract mode
 
             if offset == CAROUSEL_CENTER_OFFSET:
-                size = CENTER_SIZE
+                size = self.center_size
                 opacity = 1.0
                 btn.setGraphicsEffect(None)  # ensure no effect masks rounding
-                # No accent, no glow, no breathing, no click
             elif abs(offset - CAROUSEL_CENTER_OFFSET) == 1:
-                size = SIDE_SIZE
+                size = self.side_size
                 opacity = SIDE_OPACITY
             else:
-                size = QSize(int(SIDE_SIZE.width()*0.75), int(SIDE_SIZE.height()*0.75))
+                size = QSize(int(self.side_size.width()*0.75), int(self.side_size.height()*0.75))
                 opacity = 0.35
 
             btn.resize(size)
@@ -204,30 +206,30 @@ class CarouselWidget(QWidget):
         # Edge‑based spacing (center ↔ side ↔ outer)
         cx = self.card_container.width() // 2
         GAP = 20
-        inner = (CENTER_SIZE.width() // 2) + (SIDE_SIZE.width() // 2) + GAP
-        outer_card_w = int(SIDE_SIZE.width() * 0.75)
-        outer = inner + (SIDE_SIZE.width() // 2) + (outer_card_w // 2) + GAP
-        X_OFFSETS = {
-            -2: -outer,
-            -1: -inner,
-             0:    0,
-             1:  inner,
-             2:  outer,
-        }
+        half = self.num_visible // 2
+        inner = (self.center_size.width() // 2) + (self.side_size.width() // 2) + GAP
+
+        X_OFFSETS = {0: 0, -1: -inner, 1: inner}
+        if self.num_visible >= 5:
+            outer_card_w = int(self.side_size.width() * 0.75)
+            outer = inner + (self.side_size.width() // 2) + (outer_card_w // 2) + GAP
+            X_OFFSETS[-2] = -outer
+            X_OFFSETS[2] = outer
+
         # Anchor cards to container center only (no external lift)
         cy_visual_center = self.card_container.height() // 2
 
         for i, btn in enumerate(self.buttons):
-            offset = i - 2  # center index = 2
+            offset = i - half
 
             if offset == 0:
-                size = CENTER_SIZE
+                size = self.center_size
                 opacity = 1.0
             elif abs(offset) == 1:
-                size = SIDE_SIZE
+                size = self.side_size
                 opacity = SIDE_OPACITY
             else:
-                size = QSize(int(SIDE_SIZE.width() * 0.75), int(SIDE_SIZE.height() * 0.75))
+                size = QSize(int(self.side_size.width() * 0.75), int(self.side_size.height() * 0.75))
                 opacity = 0.35
 
             # Edge-based X position
@@ -316,9 +318,10 @@ class CarouselWidget(QWidget):
         except Exception:
             pass
         self.idle_timer.stop()
-        # Find the visually centered button (index 2)
-        if len(self.buttons) >= 3:
-            center = self.buttons[2]
+        # Find the visually centered button
+        half = self.num_visible // 2
+        if len(self.buttons) > half:
+            center = self.buttons[half]
         else:
             center = self.buttons[0]
 
