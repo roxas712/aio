@@ -227,6 +227,43 @@ def apply_computer_name_from_terminal(reg_data: Dict[str, Any]) -> None:
 # Pending Activation Window
 # ------------------------------
 
+def _ensure_client_json(reg_data: Dict[str, Any]) -> None:
+    """
+    Ensure C:\\Program Files\\aio\\config\\client.json exists.
+    If missing (e.g. deploy.ps1 path), create it from activation data.
+    If it exists, sync uuid and terminal_type to keep agent in sync.
+    """
+    from win_common import CLIENT_CONFIG_FILE
+
+    cfg = {}
+    if CLIENT_CONFIG_FILE.exists():
+        try:
+            with CLIENT_CONFIG_FILE.open("r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception:
+            cfg = {}
+
+    hw_id = reg_data.get("hardware_id") or get_persistent_machine_id()
+
+    cfg.setdefault("server_url", get_base_url())
+    cfg.setdefault("ping_path", "/client/ping")
+    cfg.setdefault("poll_interval_idle", 60)
+    cfg.setdefault("poll_interval_active", 300)
+    cfg.setdefault("lock_status", "unlocked")
+
+    # Always sync these authoritative fields from activation data
+    cfg["uuid"] = hw_id
+    cfg["terminal_type"] = reg_data.get("terminal_type", "multi")
+
+    try:
+        CLIENT_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with CLIENT_CONFIG_FILE.open("w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        log(f"[INFO] Ensured client.json at {CLIENT_CONFIG_FILE}")
+    except Exception as e:
+        log(f"[WARN] Failed to write client.json: {e}")
+
+
 def apply_server_config_and_persist(reg_data: Dict[str, Any]) -> str:
     """
     Given activation reg_data (must include activation_key and terminal),
@@ -319,6 +356,12 @@ def apply_server_config_and_persist(reg_data: Dict[str, Any]) -> str:
         write_activation_file(reg_data)
     except Exception:
         pass
+
+    # Ensure agent's client.json exists and is in sync
+    try:
+        _ensure_client_json(reg_data)
+    except Exception as e:
+        log(f"[WARN] _ensure_client_json failed: {e}")
 
     return tt
 

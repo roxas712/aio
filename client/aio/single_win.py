@@ -46,12 +46,15 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEng
 from win_common import (
     PROGRAMDATA_ROOT,
     KIOSK_DIR,
+    AIO_ROOT,
     VERSION_FILE,
     get_local_ip,
     send_click_to_server,
     send_status_to_server,
     log_activity_local,
     launch_game,
+    sync_config_from_server,
+    persist_synced_config,
 )
 
 # ------------------------------------------------------------------------------
@@ -852,6 +855,60 @@ class MainWindow(QMainWindow):
                 pass
             self.home_page = pending
             self.selected_game = {}
+
+        # Periodic config sync — polls server every 60s for game/config changes
+        self._config_sync_timer = QTimer(self)
+        self._config_sync_timer.setInterval(60_000)
+        self._config_sync_timer.timeout.connect(self._on_config_sync)
+        self._config_sync_timer.start()
+        self._sync_worker = None
+
+    # --------------------------------------------------
+    # Periodic config sync
+    # --------------------------------------------------
+
+    def _on_config_sync(self):
+        """Start background config sync (runs HTTP request off main thread)."""
+        if self._sync_worker is not None and self._sync_worker.isRunning():
+            return
+
+        from PyQt5.QtCore import QThread, pyqtSignal
+
+        class _Worker(QThread):
+            sync_complete = pyqtSignal(dict)
+            def run(self_worker):
+                try:
+                    result = sync_config_from_server()
+                    self_worker.sync_complete.emit(result or {})
+                except Exception:
+                    self_worker.sync_complete.emit({})
+
+        self._sync_worker = _Worker(self)
+        self._sync_worker.sync_complete.connect(self._handle_sync_result)
+        self._sync_worker.start()
+
+    def _handle_sync_result(self, result: dict):
+        """Process config sync result — any change triggers full kiosk restart."""
+        if not result:
+            return
+
+        if result.get("changed_terminal_type") or result.get("changed_games"):
+            persist_synced_config(result)
+            self._restart_kiosk()
+
+    def _restart_kiosk(self):
+        """Restart kiosk pipeline via activation_win.py."""
+        activation_script = AIO_ROOT / "kiosk" / "activation_win.py"
+        try:
+            flag = Path(os.environ.get("PROGRAMDATA", r"C:\\ProgramData")) / "aio" / "config" / "allow_exit.flag"
+            flag.parent.mkdir(parents=True, exist_ok=True)
+            flag.touch()
+            subprocess.Popen([sys.executable, str(activation_script)])
+            app = QApplication.instance()
+            if app:
+                app.quit()
+        except Exception:
+            pass
 
     def _manager_login(self):
         dialog = NumericKeypadDialog("Manager Login", self)

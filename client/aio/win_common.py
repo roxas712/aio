@@ -564,3 +564,157 @@ def launch_game(game: Dict[str, Any]) -> Optional[subprocess.Popen]:
         except Exception as e:
             print(f"[ERROR] Failed to open URL '{target}': {e}")
         return None
+
+
+# ------------------------------
+# Periodic config sync
+# ------------------------------
+
+SINGLE_GAME_FILE = CONFIG_DIR / "single_game.json"
+CHECK_CONFIG_PATH = "/client/check_config"
+
+
+def sync_config_from_server() -> Dict[str, Any]:
+    """
+    Fetch latest config from server using activation data.
+
+    Returns dict with:
+        terminal_type: str
+        games: list | None          (multi/multi_vert modes)
+        single_game: dict | None    (single mode)
+        changed_games: bool
+        changed_terminal_type: bool
+
+    Returns {} on any failure (network, missing activation, etc.).
+    """
+    if not ACTIVATION_FILE.exists():
+        return {}
+
+    try:
+        with ACTIVATION_FILE.open("r", encoding="utf-8") as f:
+            act = json.load(f)
+    except Exception:
+        return {}
+
+    activation_key = act.get("activation_key")
+    terminal = act.get("terminal")
+    if not activation_key or not terminal:
+        return {}
+
+    old_terminal_type = act.get("terminal_type", "multi")
+
+    base = get_server_base_url()
+    cfg_url = f"{base}{CHECK_CONFIG_PATH}"
+    try:
+        resp = requests.get(
+            cfg_url,
+            params={"activation_key": activation_key, "terminal": terminal},
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return {}
+        cfg = resp.json() or {}
+    except Exception:
+        return {}
+
+    # Resolve terminal type
+    tt = (cfg.get("terminal_type") or cfg.get("desired_terminal")
+          or act.get("terminal_type") or "multi")
+    tt = str(tt).strip().lower() if tt else "multi"
+    if tt not in ("single", "multi", "multi_vert", "lock"):
+        tt = "multi"
+
+    result = {
+        "terminal_type": tt,
+        "changed_terminal_type": (tt != old_terminal_type),
+        "games": None,
+        "single_game": None,
+        "changed_games": False,
+    }
+
+    if tt in ("multi", "multi_vert"):
+        selected = cfg.get("selected_games") or []
+        if selected:
+            all_games = get_game_library()
+            filtered = []
+            for sg in selected:
+                raw_title = (sg.get("title") or "").strip()
+                if not raw_title:
+                    continue
+                title_l = raw_title.lower()
+                match = next(
+                    (g for g in all_games if (g.get("title") or "").strip().lower() == title_l),
+                    None,
+                )
+                if match:
+                    filtered.append(match)
+                else:
+                    filtered.append({
+                        "title": sg.get("title") or "Unknown",
+                        "type": "url",
+                        "target": sg.get("url") or "",
+                        "img": sg.get("img") or "",
+                    })
+            if filtered:
+                result["games"] = filtered
+                current = load_games()
+                current_titles = sorted((g.get("title") or "").lower() for g in current)
+                new_titles = sorted((g.get("title") or "").lower() for g in filtered)
+                result["changed_games"] = (current_titles != new_titles)
+
+    elif tt == "single":
+        sg = cfg.get("selected_game") or {}
+        title = (sg.get("title") or "").strip()
+        if title:
+            all_games = get_game_library()
+            chosen = next(
+                (g for g in all_games if (g.get("title") or "").strip().lower() == title.lower()),
+                None,
+            )
+            if not chosen:
+                chosen = {
+                    "title": sg.get("title") or "Unknown",
+                    "type": "url",
+                    "target": sg.get("url") or "",
+                    "img": sg.get("img") or "",
+                }
+            result["single_game"] = chosen
+            current_single = {}
+            if SINGLE_GAME_FILE.exists():
+                try:
+                    with SINGLE_GAME_FILE.open("r", encoding="utf-8") as f:
+                        current_single = json.load(f)
+                except Exception:
+                    pass
+            result["changed_games"] = (
+                (current_single.get("title") or "").lower() != title.lower()
+            )
+
+    return result
+
+
+def persist_synced_config(sync_result: Dict[str, Any]) -> None:
+    """Write synced config to disk (games.json / single_game.json / activation.json)."""
+    tt = sync_result.get("terminal_type", "multi")
+
+    if tt in ("multi", "multi_vert") and sync_result.get("games"):
+        save_games(sync_result["games"])
+
+    elif tt == "single" and sync_result.get("single_game"):
+        try:
+            SINGLE_GAME_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with SINGLE_GAME_FILE.open("w", encoding="utf-8") as f:
+                json.dump(sync_result["single_game"], f, indent=2)
+        except Exception:
+            pass
+
+    # Update terminal_type in activation.json
+    if ACTIVATION_FILE.exists():
+        try:
+            with ACTIVATION_FILE.open("r", encoding="utf-8") as f:
+                act = json.load(f)
+            act["terminal_type"] = tt
+            with ACTIVATION_FILE.open("w", encoding="utf-8") as f:
+                json.dump(act, f, indent=2)
+        except Exception:
+            pass

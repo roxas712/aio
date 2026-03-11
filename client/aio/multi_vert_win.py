@@ -442,6 +442,15 @@ class VerticalMultiWindow(MainWindow):
         self._multi_root.setParent(self)
         self._multi_root.raise_()
 
+        # Remove MainWindow's simple "AD SPACE" placeholder overlay.
+        # MainWindow creates it when terminal_type == "multi_vert" — we replace
+        # it with the full AdLoopWidget below.
+        if self.ad_overlay is not None:
+            self.ad_overlay.hide()
+            self.ad_overlay.setParent(None)
+            self.ad_overlay.deleteLater()
+            self.ad_overlay = None
+
         # Re-apply fullscreen after a short delay (handles display rotation settling)
         QTimer.singleShot(500, self._reapply_fullscreen)
 
@@ -496,6 +505,39 @@ QPushButton:hover {
                 self.stack.currentChanged.connect(self._enforce_bottom_layout)
         except Exception:
             pass
+
+    def _apply_new_games(self, new_games: list):
+        """Override: rebuild game UI then re-apply vertical-specific adjustments."""
+        super()._apply_new_games(new_games)
+
+        # Re-apply vertical carousel sizing
+        if self.games:
+            self._replace_carousel_for_vertical()
+
+        # Re-enforce bottom layout geometry
+        self._enforce_bottom_layout()
+
+        # Re-apply vertical styling tweaks
+        if hasattr(self.main_menu, 'start_btn'):
+            self.main_menu.start_btn.setFixedSize(260, 55)
+            self.main_menu.start_btn.setStyleSheet("""
+QPushButton {
+    font-size: 20px;
+    font-weight: bold;
+    background-color: #FFD700;
+    color: black;
+    border-radius: 12px;
+}
+QPushButton:hover {
+    background-color: #FFEA80;
+}
+""")
+
+        if hasattr(self, 'grid_menu'):
+            grid_layout = self.grid_menu.layout()
+            if grid_layout:
+                grid_layout.setContentsMargins(20, 20, 20, 20)
+                grid_layout.setSpacing(15)
 
     def closeEvent(self, event):
         """Block unexpected window closure. Exit only via explicit app.quit()."""

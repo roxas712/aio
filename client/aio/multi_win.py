@@ -351,6 +351,9 @@ class CarouselWidget(QWidget):
 
 from win_common import (
     load_games,
+    save_games,
+    sync_config_from_server,
+    persist_synced_config,
     log_activity_local,
     send_click_to_server,
     send_status_to_server,
@@ -1469,6 +1472,13 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # --- Config sync timer (check server every 60 seconds) ---
+        self._config_sync_timer = QTimer(self)
+        self._config_sync_timer.setInterval(60_000)
+        self._config_sync_timer.timeout.connect(self._on_config_sync)
+        self._config_sync_timer.start()
+        self._sync_worker = None
+
         # Window size and fullscreen setup
         import ctypes
         user32 = ctypes.windll.user32
@@ -1479,6 +1489,86 @@ class MainWindow(QMainWindow):
         self.move(0, 0)
         self.showFullScreen()
         self._sync_tap_zone_visibility()
+
+    # --------------------------------------------------
+    # Periodic config sync
+    # --------------------------------------------------
+
+    def _on_config_sync(self):
+        """Start background config sync (runs HTTP request off main thread)."""
+        if self._sync_worker is not None and self._sync_worker.isRunning():
+            return  # Previous sync still in progress
+
+        from PyQt5.QtCore import QThread, pyqtSignal
+
+        class _Worker(QThread):
+            sync_complete = pyqtSignal(dict)
+            def run(self_worker):
+                try:
+                    result = sync_config_from_server()
+                    self_worker.sync_complete.emit(result or {})
+                except Exception:
+                    self_worker.sync_complete.emit({})
+
+        self._sync_worker = _Worker(self)
+        self._sync_worker.sync_complete.connect(self._handle_sync_result)
+        self._sync_worker.start()
+
+    def _handle_sync_result(self, result: dict):
+        """Process config sync result on the main thread."""
+        if not result:
+            return
+
+        # Terminal type changed → restart through activation_win.py
+        if result.get("changed_terminal_type"):
+            persist_synced_config(result)
+            self._restart_kiosk()
+            return
+
+        # Games changed → persist and rebuild UI
+        if result.get("changed_games"):
+            persist_synced_config(result)
+            self._apply_new_games(result.get("games") or [])
+
+    def _apply_new_games(self, new_games: list):
+        """Rebuild MainMenu and GridMenu with a new game list."""
+        # Remove old widgets from stack
+        if hasattr(self, 'grid_menu'):
+            self.stack.removeWidget(self.grid_menu)
+            self.grid_menu.deleteLater()
+            del self.grid_menu
+        self.stack.removeWidget(self.main_menu)
+        self.main_menu.deleteLater()
+
+        self.games = new_games
+
+        if self.games:
+            self.main_menu = MainMenu(self.launch_game, self.games, self)
+            self.grid_menu = GridMenu(self.launch_game, self.games, self)
+            self.stack.addWidget(self.main_menu)
+            self.stack.addWidget(self.grid_menu)
+            self.stack.setCurrentWidget(self.main_menu)
+        else:
+            self.main_menu = PendingConfigPage(self)
+            self.stack.addWidget(self.main_menu)
+            self.stack.setCurrentWidget(self.main_menu)
+
+        self._sync_tap_zone_visibility()
+
+    def _restart_kiosk(self):
+        """Restart kiosk pipeline via activation_win.py (e.g. terminal_type changed)."""
+        activation_script = AIO_ROOT / "kiosk" / "activation_win.py"
+        try:
+            flag = Path(os.environ.get("PROGRAMDATA", r"C:\\ProgramData")) / "aio" / "config" / "allow_exit.flag"
+            flag.parent.mkdir(parents=True, exist_ok=True)
+            flag.touch()
+            subprocess.Popen([sys.executable, str(activation_script)])
+            app = QApplication.instance()
+            if app:
+                app.quit()
+        except Exception:
+            pass
+
     def _grid_idle_return(self):
         # Only return if we are currently on the grid view
         if hasattr(self, "grid_menu") and self.stack.currentWidget() is self.grid_menu:

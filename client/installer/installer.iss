@@ -56,6 +56,10 @@ Name: "{commonappdata}\aio"; Flags: uninsalwaysuninstall
 Name: "{commonappdata}\aio\config"; Flags: uninsalwaysuninstall
 ; ProgramData AIO logs (agent writes here)
 Name: "{commonappdata}\aio\logs"; Flags: uninsalwaysuninstall
+; ProgramData AIO ads (vertical mode ad videos)
+Name: "{commonappdata}\aio\ads"; Flags: uninsalwaysuninstall
+; ProgramData AIO videos (fallback video assets)
+Name: "{commonappdata}\aio\vids"; Flags: uninsalwaysuninstall
 ; Public Documents for Bomgar / AIO tools
 Name: "{commondocs}\aio"; Flags: uninsalwaysuninstall
 
@@ -76,6 +80,10 @@ Source: "C:\AIOv2\kiosk\loading.py";         DestDir: "{app}\kiosk"; Flags: igno
 Source: "C:\AIOv2\kiosk\multi_vert_win.py"; DestDir: "{app}\kiosk"; Flags: ignoreversion
 Source: "C:\AIOv2\kiosk\loading_vert.py";   DestDir: "{app}\kiosk"; Flags: ignoreversion
 Source: "C:\AIOv2\kiosk\return_vert.py";    DestDir: "{app}\kiosk"; Flags: ignoreversion
+Source: "C:\AIOv2\kiosk\set_portrait.py";   DestDir: "{app}\kiosk"; Flags: ignoreversion
+
+; --- Deploy script (for remote OTA updates) ---
+Source: "C:\AIOv2\deploy.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 ; --- Images / assets ---
 Source: "C:\AIOv2\kiosk\img\*";  DestDir: "{app}\kiosk\img"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -125,9 +133,9 @@ Filename: "{#PythonExePath}"; \
 
 ; 3) Install required Python packages (PyQt5, PyQtWebEngine, psutil, requests, websockets)
 Filename: "{#PythonExePath}"; \
-    Parameters: "-m pip install PyQt5 PyQtWebEngine psutil requests websockets"; \
+    Parameters: "-m pip install PyQt5 PyQtWebEngine psutil requests websockets pywin32"; \
     Flags: runhidden waituntilterminated; \
-    StatusMsg: "Installing Python dependencies (PyQt5, PyQtWebEngine, psutil, requests, websockets)..."; \
+    StatusMsg: "Installing Python dependencies (PyQt5, PyQtWebEngine, psutil, requests, websockets, pywin32)..."; \
     Check: PythonInstalled
 
 
@@ -463,6 +471,8 @@ Type: filesandordirs; Name: "{app}\platform_installs"
 Type: filesandordirs; Name: "{commondocs}\aio"
 Type: filesandordirs; Name: "{commonappdata}\aio\config"
 Type: filesandordirs; Name: "{commonappdata}\aio\logs"
+Type: filesandordirs; Name: "{commonappdata}\aio\ads"
+Type: filesandordirs; Name: "{commonappdata}\aio\vids"
 
 ; Remove installed game/browser applications deployed by this installer
 Type: filesandordirs; Name: "C:\Program Files (x86)\FirePhoenix"
