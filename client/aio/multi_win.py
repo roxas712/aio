@@ -118,7 +118,7 @@ class CarouselWidget(QWidget):
             existing_layout.deleteLater()
         self.card_container.setFixedSize(cont)
 
-        layout.addWidget(self.card_container)
+        layout.addWidget(self.card_container, alignment=Qt.AlignCenter)
 
         self._cards_initialized = False
 

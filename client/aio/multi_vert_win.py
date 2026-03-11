@@ -191,11 +191,13 @@ class AdLoopWidget(QWidget):
         # Create folder if missing
         folder_path.mkdir(parents=True, exist_ok=True)
 
-        # Only play videos explicitly placed in the ads folder.
-        # Bundled fallback videos are NOT used — they crash DirectShow
-        # on systems without proper audio/video hardware (VMs, kiosks
-        # running as SYSTEM). Real deployments will have ad content here.
+        # Check ads folder first, fall back to default loop in kiosk/vids
         videos = list(sorted(folder_path.glob("*.mp4")))
+        if not videos:
+            default_vid = AIO_ROOT / "kiosk" / "vids" / "AIO_upper-loop.mp4"
+            if default_vid.exists():
+                videos = [default_vid]
+                log_debug(f"[AD] Using default ad loop: {default_vid}")
 
         if videos:
             # Store paths and defer ALL player creation + playback to after event loop
@@ -316,6 +318,8 @@ class VerticalManagerPage(QWidget):
         title.setStyleSheet("color: white; font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
 
+        self.advanced_mode = advanced
+
         if advanced:
             warn = QLabel("ADVANCED OPTIONS ENABLED", self)
             warn.setAlignment(Qt.AlignCenter)
@@ -362,6 +366,88 @@ class VerticalManagerPage(QWidget):
         hw_label.setAlignment(Qt.AlignCenter)
         hw_label.setStyleSheet(info_style)
         layout.addWidget(hw_label)
+
+        # Advanced: Orientation + Resolution controls
+        if self.advanced_mode:
+            import win32api
+            import win32con
+            from PyQt5.QtWidgets import QComboBox
+
+            current = win32api.EnumDisplaySettings(None, win32con.ENUM_CURRENT_SETTINGS)
+            current_w = current.PelsWidth
+            current_h = current.PelsHeight
+            current_orientation = current.DisplayOrientation
+
+            self._original_w = current_w
+            self._original_h = current_h
+            self._original_orientation = current_orientation
+            self._pending_orientation = current_orientation
+            self._pending_resolution = (current_w, current_h)
+
+            combo_style = """
+                QComboBox {
+                    font-size: 13px; padding: 4px;
+                    background-color: #333; color: white; border-radius: 4px;
+                }
+            """
+
+            dropdown_row = QHBoxLayout()
+            dropdown_row.setSpacing(20)
+
+            # Orientation
+            orientation_col = QVBoxLayout()
+            orientation_label = QLabel("Orientation", self)
+            orientation_label.setAlignment(Qt.AlignCenter)
+            orientation_label.setStyleSheet("color: white; font-size: 13px;")
+            orientation_col.addWidget(orientation_label)
+
+            self.orientation_combo = QComboBox(self)
+            self.orientation_combo.setFixedWidth(180)
+            self.orientation_combo.setStyleSheet(combo_style)
+            for text, mode in [("Landscape", 0), ("Portrait", 1),
+                               ("Landscape (Flip)", 2), ("Portrait (Flip)", 3)]:
+                self.orientation_combo.addItem(text, mode)
+            self.orientation_combo.setCurrentIndex(current_orientation)
+            self.orientation_combo.currentIndexChanged.connect(
+                lambda i: setattr(self, "_pending_orientation",
+                                  self.orientation_combo.itemData(i))
+            )
+            orientation_col.addWidget(self.orientation_combo, alignment=Qt.AlignCenter)
+
+            # Resolution
+            resolution_col = QVBoxLayout()
+            resolution_label = QLabel("Resolution", self)
+            resolution_label.setAlignment(Qt.AlignCenter)
+            resolution_label.setStyleSheet("color: white; font-size: 13px;")
+            resolution_col.addWidget(resolution_label)
+
+            self.resolution_combo = QComboBox(self)
+            self.resolution_combo.setFixedWidth(180)
+            self.resolution_combo.setStyleSheet(combo_style)
+            if current_h > current_w:
+                res_options = [(720, 1280), (1080, 1920), (2160, 3840)]
+            else:
+                res_options = [(1280, 720), (1920, 1080), (3840, 2160)]
+            for w, h in res_options:
+                self.resolution_combo.addItem(f"{w} x {h}", (w, h))
+            self.resolution_combo.currentIndexChanged.connect(
+                lambda i: setattr(self, "_pending_resolution",
+                                  self.resolution_combo.itemData(i))
+            )
+            resolution_col.addWidget(self.resolution_combo, alignment=Qt.AlignCenter)
+
+            dropdown_row.addLayout(orientation_col)
+            dropdown_row.addLayout(resolution_col)
+            layout.addLayout(dropdown_row)
+
+            save_btn = QPushButton("Save Display Settings", self)
+            save_btn.setStyleSheet(
+                "QPushButton { font-size: 13px; font-weight: bold; padding: 6px 14px; "
+                "background-color: #FFD700; color: black; border-radius: 6px; } "
+                "QPushButton:hover { background-color: #FFEA80; }"
+            )
+            save_btn.clicked.connect(self._confirm_display_changes)
+            layout.addWidget(save_btn, alignment=Qt.AlignCenter)
 
         layout.addStretch(1)
 
@@ -419,6 +505,39 @@ class VerticalManagerPage(QWidget):
             painter.end()
         else:
             super().paintEvent(event)
+
+    def _confirm_display_changes(self):
+        from PyQt5.QtWidgets import QMessageBox
+        dialog = QMessageBox(None)
+        dialog.setWindowTitle("Confirm Restart")
+        dialog.setText("Changing these settings requires a restart.\n\nContinue?")
+        dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
+        dialog.setDefaultButton(QMessageBox.Cancel)
+        dialog.setWindowFlags(Qt.Dialog | Qt.WindowStaysOnTopHint)
+        dialog.setWindowModality(Qt.ApplicationModal)
+        reply = dialog.exec_()
+        if reply == QMessageBox.Cancel:
+            self._pending_orientation = self._original_orientation
+            self._pending_resolution = (self._original_w, self._original_h)
+            return
+        try:
+            import win32api
+            import win32con
+            devmode = win32api.EnumDisplaySettings(None, win32con.ENUM_CURRENT_SETTINGS)
+            if hasattr(self, "_pending_orientation"):
+                orientation = self._pending_orientation
+                if orientation in (1, 3):
+                    devmode.PelsWidth, devmode.PelsHeight = devmode.PelsHeight, devmode.PelsWidth
+                devmode.DisplayOrientation = orientation
+            if hasattr(self, "_pending_resolution"):
+                w, h = self._pending_resolution
+                devmode.PelsWidth = w
+                devmode.PelsHeight = h
+            win32api.ChangeDisplaySettings(devmode, 0)
+            os.system("shutdown /r /t 0 /f")
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox as MB
+            MB.critical(None, "Display Error", f"Failed to apply settings:\n{e}")
 
     def _relaunch(self):
         try:
@@ -592,7 +711,7 @@ QPushButton:hover {
             parent=self.main_menu,
             center_size=QSize(280, 400),
             side_size=QSize(230, 340),
-            container_size=QSize(1000, 480),
+            container_size=QSize(960, 480),
             num_visible=5,
             gap=-40,
         )
