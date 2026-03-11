@@ -591,19 +591,20 @@ class VerticalMultiWindow(MainWindow):
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)  # QWIDGETSIZE_MAX
 
-        # Store reference to original multi UI root and replace the
-        # QMainWindow central widget with a transparent placeholder.
-        # Without this, QMainWindow's internal layout frame paints an
-        # opaque background that obscures manually-positioned children.
+        # Store reference to original multi UI root.
+        # Reparent it as a direct child so we can manually position it
+        # in the bottom 40% of the screen.
         self._multi_root = self.centralWidget()
-        placeholder = QWidget()
-        placeholder.setAttribute(Qt.WA_TranslucentBackground)
-        placeholder.setStyleSheet("background: transparent;")
-        self.setCentralWidget(placeholder)
         self._multi_root.setParent(self)
+        # Force opaque background so the reparented widget creates a
+        # proper paint context (WA_TranslucentBackground can fail when
+        # widget is reparented outside QMainWindow's internal layout).
+        self._multi_root.setAttribute(Qt.WA_TranslucentBackground, False)
+        self._multi_root.setAutoFillBackground(True)
         self._multi_root.show()
         self._multi_root.raise_()
-        log_debug(f"[VERT] _multi_root reparented, visible={self._multi_root.isVisible()}")
+        log_debug(f"[VERT] _multi_root reparented, visible={self._multi_root.isVisible()}, "
+                  f"autoFill={self._multi_root.autoFillBackground()}")
 
         # Remove MainWindow's simple "AD SPACE" placeholder overlay.
         # MainWindow creates it when terminal_type == "multi_vert" — we replace
@@ -682,8 +683,23 @@ QPushButton:hover {
         except Exception:
             pass
 
+        # Diagnostic: log child widget state
+        log_debug(f"[VERT] bg_label geo: {self.bg_label.width()}x{self.bg_label.height()} "
+                  f"visible={self.bg_label.isVisible()}")
+        log_debug(f"[VERT] stack geo: {self.stack.width()}x{self.stack.height()} "
+                  f"visible={self.stack.isVisible()}")
+        log_debug(f"[VERT] _multi_root layout active={self._multi_root.layout().isEnabled() if self._multi_root.layout() else 'NO LAYOUT'}")
         log_debug(f"[VERT] __init__ complete. games={len(self.games) if self.games else 0}, "
                   f"has_carousel={hasattr(self.main_menu, 'carousel')}")
+
+        # DEBUG: bright test widget to verify rendering in bottom 40%
+        self._test_widget = QLabel("RENDER TEST", self)
+        self._test_widget.setGeometry(100, 1300, 300, 100)
+        self._test_widget.setStyleSheet(
+            "background-color: red; color: white; font-size: 32px; font-weight: bold;"
+        )
+        self._test_widget.show()
+        self._test_widget.raise_()
 
     def _apply_new_games(self, new_games: list):
         """Override: rebuild game UI then re-apply vertical-specific adjustments."""
