@@ -1,0 +1,138 @@
+name: Build Installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------
+      # Stage files to C:\AIOv2 (matches installer.iss Source paths)
+      # ---------------------------------------------------------------
+      - name: Stage files to C:\AIOv2
+        shell: pwsh
+        env:
+          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
+        run: |
+          # Create directory structure
+          $dirs = @(
+            "C:\AIOv2\kiosk\img",
+            "C:\AIOv2\kiosk\vids",
+            "C:\AIOv2\agent",
+            "C:\AIOv2\tools",
+            "C:\AIOv2\deps",
+            "C:\AIOv2\config",
+            "C:\AIOv2\launcher\publish",
+            "C:\AIOv2\build\bin"
+          )
+          foreach ($d in $dirs) { New-Item -Path $d -ItemType Directory -Force | Out-Null }
+
+          # Kiosk Python files
+          Copy-Item "client\aio\*.py" "C:\AIOv2\kiosk\"
+
+          # Image assets
+          if (Test-Path "client\aio\img") {
+            Copy-Item "client\aio\img\*" "C:\AIOv2\kiosk\img\" -Recurse -Force
+          }
+
+          # Video assets
+          if (Test-Path "client\aio\vids") {
+            Copy-Item "client\aio\vids\*" "C:\AIOv2\kiosk\vids\" -Recurse -Force
+          }
+
+          # Watchdog
+          Copy-Item "client\watchdog.py" "C:\AIOv2\agent\"
+
+          # Deploy script
+          Copy-Item "deploy.ps1" "C:\AIOv2\"
+
+          # Branding assets
+          Copy-Item "client\installer\PGOC_Logo.png" "C:\AIOv2\deps\"
+          Copy-Item "client\installer\ic_launcher.ico" "C:\AIOv2\deps\"
+          Copy-Item "client\installer\aio_wall.png" "C:\AIOv2\deps\"
+
+          # GitHub token for auto-updater (from secret)
+          if ($env:GH_PAT_TOKEN) {
+            [System.IO.File]::WriteAllText("C:\AIOv2\config\github_token.txt", $env:GH_PAT_TOKEN.Trim())
+          } else {
+            Write-Warning "GH_PAT_TOKEN secret not set - github_token.txt will be empty"
+            [System.IO.File]::WriteAllText("C:\AIOv2\config\github_token.txt", "")
+          }
+
+          Write-Host "Staging complete."
+
+      # ---------------------------------------------------------------
+      # Build launcher.exe (.NET 8.0)
+      # ---------------------------------------------------------------
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0"
+
+      - name: Build launcher.exe
+        shell: pwsh
+        run: |
+          dotnet publish client\launcher\launcher.csproj `
+            -c Release -r win-x64 --self-contained `
+            -p:PublishSingleFile=true `
+            -o "C:\AIOv2\launcher\publish"
+          Write-Host "launcher.exe built successfully."
+
+      # ---------------------------------------------------------------
+      # Build agent.exe (PyInstaller)
+      # ---------------------------------------------------------------
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build agent.exe
+        shell: pwsh
+        run: |
+          pip install pyinstaller psutil requests websockets
+          pyinstaller --onefile --name agent --distpath "C:\AIOv2\build\bin" client\installer\agent.py
+          Write-Host "agent.exe built successfully."
+
+      # ---------------------------------------------------------------
+      # Download nssm.exe
+      # ---------------------------------------------------------------
+      - name: Download nssm
+        shell: pwsh
+        run: |
+          $nssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
+          $zipPath = "$env:TEMP\nssm.zip"
+          $extractPath = "$env:TEMP\nssm-extract"
+
+          Invoke-WebRequest -Uri $nssmUrl -OutFile $zipPath
+          Expand-Archive $zipPath -DestinationPath $extractPath -Force
+          Copy-Item "$extractPath\nssm-2.24\win64\nssm.exe" "C:\AIOv2\tools\"
+          Write-Host "nssm.exe downloaded."
+
+      # ---------------------------------------------------------------
+      # Compile installer with Inno Setup
+      # ---------------------------------------------------------------
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "client\installer\installer.iss"
+
+      # ---------------------------------------------------------------
+      # Upload built installer
+      # ---------------------------------------------------------------
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIO-Installer
+          path: client\installer\Output\AIOv2-Setup.exe
