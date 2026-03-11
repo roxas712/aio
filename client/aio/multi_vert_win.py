@@ -591,24 +591,11 @@ class VerticalMultiWindow(MainWindow):
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)  # QWIDGETSIZE_MAX
 
-        # Store reference to original multi UI root.
-        # Reparent it as a direct child so we can manually position it
-        # in the bottom 40% of the screen.
+        # Keep central widget in QMainWindow's layout (do NOT reparent).
+        # Use a top margin to push game content to the bottom 40%.
         self._multi_root = self.centralWidget()
-        self._multi_root.setParent(self)
-        # Force opaque background so the reparented widget creates a
-        # proper paint context (WA_TranslucentBackground can fail when
-        # widget is reparented outside QMainWindow's internal layout).
-        self._multi_root.setAttribute(Qt.WA_TranslucentBackground, False)
-        self._multi_root.setAutoFillBackground(True)
-        self._multi_root.show()
-        self._multi_root.raise_()
-        log_debug(f"[VERT] _multi_root reparented, visible={self._multi_root.isVisible()}, "
-                  f"autoFill={self._multi_root.autoFillBackground()}")
 
         # Remove MainWindow's simple "AD SPACE" placeholder overlay.
-        # MainWindow creates it when terminal_type == "multi_vert" — we replace
-        # it with the full AdLoopWidget below.
         if self.ad_overlay is not None:
             self.ad_overlay.hide()
             self.ad_overlay.setParent(None)
@@ -621,25 +608,26 @@ class VerticalMultiWindow(MainWindow):
         # Force terminal type
         self.terminal_type = "multi_vert"
 
-        # Create Ad Overlay
-        self.ad_overlay = AdLoopWidget(self)
-        self._update_ad_geometry()
+        # Push game content (bg_label + stack) to bottom 40% via margin
+        ad_height = int((self.height() or 1920) * AD_RATIO)
+        if self._multi_root.layout():
+            self._multi_root.layout().setContentsMargins(0, ad_height, 0, 0)
+
+        # Create Ad Overlay as child of central widget (covers top 60%)
+        self.ad_overlay = AdLoopWidget(self._multi_root)
+        self.ad_overlay.setGeometry(0, 0, self.width() or 1080, ad_height)
         self.ad_overlay.show()
+        self.ad_overlay.raise_()
 
         ads_folder = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "ads"
         self.ad_overlay.load_ads(ads_folder)
-        self.ad_overlay.raise_()
 
-        log_debug(f"[VERT] Window size: {self.width()}x{self.height()}")
-        log_debug(f"[VERT] _multi_root geo: {self._multi_root.geometry().x()},{self._multi_root.geometry().y()} "
-                  f"{self._multi_root.width()}x{self._multi_root.height()} visible={self._multi_root.isVisible()}")
-        log_debug(f"[VERT] ad_overlay geo: {self.ad_overlay.geometry().x()},{self.ad_overlay.geometry().y()} "
-                  f"{self.ad_overlay.width()}x{self.ad_overlay.height()} visible={self.ad_overlay.isVisible()}")
+        log_debug(f"[VERT] Window size: {self.width()}x{self.height()}, margin_top={ad_height}")
 
         # Volume control button (upper-right of ad area)
         self._volume_btn = VolumeButton(
             on_volume_changed=self._on_volume_changed,
-            parent=self
+            parent=self._multi_root
         )
         self._position_volume_button()
         self._volume_btn.raise_()
@@ -670,12 +658,6 @@ QPushButton:hover {
                 grid_layout.setContentsMargins(20, 20, 20, 20)
                 grid_layout.setSpacing(15)
 
-        # Ensure stack and main_menu are visible
-        if hasattr(self, 'stack'):
-            self.stack.show()
-        if hasattr(self, 'main_menu'):
-            self.main_menu.show()
-
         # Enforce layout whenever stacked content changes
         try:
             if hasattr(self, 'stack'):
@@ -694,7 +676,7 @@ QPushButton:hover {
         if self.games:
             self._replace_carousel_for_vertical()
 
-        # Re-enforce bottom layout geometry
+        # Re-enforce margin-based layout
         self._enforce_bottom_layout()
 
         # Re-apply vertical styling tweaks
@@ -767,40 +749,28 @@ QPushButton:hover {
 
     def _reapply_fullscreen(self):
         screen = self.screen().geometry()
-        log_debug(f"[VERT] _reapply_fullscreen screen={screen.width()}x{screen.height()} at ({screen.x()},{screen.y()})")
+        log_debug(f"[VERT] _reapply_fullscreen screen={screen.width()}x{screen.height()}")
         self.setGeometry(screen)
         self.showFullScreen()
-        self._update_ad_geometry()
-        self._enforce_bottom_layout()
+        # resizeEvent will update margins and ad geometry
         self._position_volume_button()
-
-        # Ensure widgets are visible after fullscreen reapply
-        if self._multi_root:
-            self._multi_root.show()
-        if self.ad_overlay:
-            self.ad_overlay.show()
-        log_debug(f"[VERT] After reapply: root={self._multi_root.geometry().y()},{self._multi_root.height()} "
-                  f"ad={self.ad_overlay.height()}")
 
     # --------------------------------------------------
     # Geometry Handling
     # --------------------------------------------------
 
     def resizeEvent(self, event):
-        # IMPORTANT: Do NOT call MainWindow.resizeEvent (super()).
-        # MainWindow.resizeEvent sets bg_label to the full 1920px window
-        # height (inside _multi_root which is only 768px) and positions
-        # ad_overlay at 40% instead of 60%.  This fights with vertical
-        # layout and eventually causes a permanent black screen.
+        # Skip MainWindow.resizeEvent — it assumes landscape layout and
+        # sets bg_label/ad_overlay geometry incorrectly for vertical mode.
+        # We handle everything via margin + manual ad positioning instead.
         event.accept()
         self._update_ad_geometry()
         self._position_volume_button()
 
-        # Move secret tap zone to game area (not behind ad overlay)
+        # Move secret tap zone to top of game area (below ad)
         if hasattr(self, '_secret_btn'):
-            screen_h = self.height()
-            game_y = screen_h - int(screen_h * GAME_RATIO)
-            self._secret_btn.move(0, game_y)
+            ad_height = int(self.height() * AD_RATIO)
+            self._secret_btn.move(0, ad_height)
             self._secret_btn.raise_()
 
     def _update_ad_geometry(self):
@@ -809,28 +779,22 @@ QPushButton:hover {
 
         screen_w = self.width()
         screen_h = self.height()
-
         ad_height = int(screen_h * AD_RATIO)
-        game_area_height = int(screen_h * GAME_RATIO)
-        game_y = screen_h - game_area_height
 
+        # Push game content to bottom 40% via top margin
+        if self._multi_root.layout():
+            self._multi_root.layout().setContentsMargins(0, ad_height, 0, 0)
+
+        # Position ad overlay over the top 60%
         self.ad_overlay.setGeometry(0, 0, screen_w, ad_height)
         self.ad_overlay.raise_()
 
-        self._multi_root.setGeometry(0, game_y, screen_w, game_area_height)
-        self._multi_root.setFixedSize(screen_w, game_area_height)
-        self._multi_root.raise_()
-
     def _enforce_bottom_layout(self):
-        screen_w = self.width()
-        screen_h = self.height()
-
-        game_area_height = int(screen_h * GAME_RATIO)
-        game_y = screen_h - game_area_height
-
-        if hasattr(self, '_multi_root') and self._multi_root:
-            self._multi_root.setGeometry(0, game_y, screen_w, game_area_height)
-            self._multi_root.setFixedSize(screen_w, game_area_height)
+        """Re-apply the top margin that pushes game content to bottom 40%."""
+        if not self._multi_root or not self._multi_root.layout():
+            return
+        ad_height = int(self.height() * AD_RATIO)
+        self._multi_root.layout().setContentsMargins(0, ad_height, 0, 0)
 
     # --------------------------------------------------
     # Admin Menu Override
