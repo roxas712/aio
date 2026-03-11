@@ -93,11 +93,12 @@ BREATH_ANIM_MS = 2200
 class CarouselWidget(QWidget):
     def __init__(self, games, on_select, parent=None, *,
                  center_size=None, side_size=None,
-                 container_size=None, num_visible=5):
+                 container_size=None, num_visible=5, gap=20):
         super().__init__(parent)
         self.center_size = center_size or CENTER_SIZE
         self.side_size = side_size or SIDE_SIZE
         self.num_visible = num_visible  # 3 or 5
+        self.gap = gap
         cont = container_size or QSize(2200, 700)
 
         self.setMinimumHeight(cont.height() + 20)
@@ -145,7 +146,7 @@ class CarouselWidget(QWidget):
 
         # Edge‑based spacing (center ↔ side ↔ outer)
         cx = self.card_container.width() // 2
-        GAP = 20
+        GAP = self.gap
         half = self.num_visible // 2  # 2 for 5-card, 1 for 3-card
         inner = (self.center_size.width() // 2) + (self.side_size.width() // 2) + GAP
 
@@ -193,9 +194,11 @@ class CarouselWidget(QWidget):
             y = cy_visual_center - size.height() // 2
             btn.move(int(x), int(y))
             btn.show()
-            if offset == 0:
-                btn.raise_()
             self.buttons.append(btn)
+
+        # Z-order: raise from outermost to center so center is on top
+        for i in sorted(range(len(self.buttons)), key=lambda i: -abs(i - half)):
+            self.buttons[i].raise_()
 
         if animate:
             self._animate_cards()
@@ -205,7 +208,7 @@ class CarouselWidget(QWidget):
     def _animate_cards(self):
         # Edge‑based spacing (center ↔ side ↔ outer)
         cx = self.card_container.width() // 2
-        GAP = 20
+        GAP = self.gap
         half = self.num_visible // 2
         inner = (self.center_size.width() // 2) + (self.side_size.width() // 2) + GAP
 
@@ -251,8 +254,10 @@ class CarouselWidget(QWidget):
                 fade.start()
             else:
                 btn.setWindowOpacity(1.0)
-            if offset == 0:
-                btn.raise_()
+
+        # Z-order: raise from outermost to center so center is on top
+        for i in sorted(range(len(self.buttons)), key=lambda i: -abs(i - half)):
+            self.buttons[i].raise_()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

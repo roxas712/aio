@@ -590,16 +590,14 @@ QPushButton:hover {
             games=self.games,
             on_select=self.main_menu._game_selected,
             parent=self.main_menu,
-            center_size=QSize(160, 240),
-            side_size=QSize(120, 180),
-            container_size=QSize(860, 300),
+            center_size=QSize(280, 400),
+            side_size=QSize(230, 340),
+            container_size=QSize(1000, 480),
             num_visible=5,
+            gap=-40,
         )
-        # Center card_container by adding stretches on both sides of HBoxLayout
-        carousel_layout = new_carousel.layout()
-        carousel_layout.setContentsMargins(0, 5, 0, 5)
-        carousel_layout.insertStretch(0, 1)
-        carousel_layout.addStretch(1)
+        # Remove internal padding so container fills the carousel widget width
+        new_carousel.layout().setContentsMargins(0, 0, 0, 0)
         self.main_menu.carousel = new_carousel
         # Insert without alignment constraint so widget fills available width
         self.main_menu.layout().insertWidget(1, new_carousel)
