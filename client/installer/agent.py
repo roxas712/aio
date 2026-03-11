@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -228,7 +229,16 @@ def apply_server_response(
 
     if commands:
         logging.info("Received commands from server: %s", commands)
-        # TODO: handle restart/lock/unlock/remote/nuke/etc.
+
+        if commands.get("restart"):
+            logging.info("Executing system restart (requested by server)")
+            try:
+                subprocess.Popen(
+                    ["shutdown", "/r", "/t", "5", "/c", "AIO remote restart"],
+                    creationflags=0x08000000,  # CREATE_NO_WINDOW
+                )
+            except Exception as e:
+                logging.error("Failed to execute restart: %s", e)
 
     if new_config:
         logging.info("Received config from server: %s", new_config)

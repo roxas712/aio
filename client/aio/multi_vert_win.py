@@ -330,13 +330,21 @@ class VerticalManagerPage(QWidget):
         layout.addWidget(ip_label)
 
         version = "N/A"
+        commit_sha = ""
         try:
             if VERSION_FILE.exists():
                 with VERSION_FILE.open("r", encoding="utf-8") as vf:
-                    version = json.load(vf).get("version", "N/A")
+                    vdata = json.load(vf)
+                    version = vdata.get("version", "N/A")
+                    sha = vdata.get("commit_sha", "")
+                    if sha:
+                        commit_sha = sha[:7]
         except Exception:
             pass
-        ver_label = QLabel(f"Version: {version}", self)
+        ver_text = f"Version: {version}"
+        if commit_sha:
+            ver_text += f" ({commit_sha})"
+        ver_label = QLabel(ver_text, self)
         ver_label.setAlignment(Qt.AlignCenter)
         ver_label.setStyleSheet(info_style)
         layout.addWidget(ver_label)

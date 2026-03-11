@@ -411,15 +411,22 @@ class ManagerPage(QWidget):
         main_layout.addWidget(ip_label)
 
         version = "N/A"
+        commit_sha = ""
         try:
             if VERSION_FILE.exists():
                 with VERSION_FILE.open("r", encoding="utf-8") as vf:
                     version_data = json.load(vf)
                     version = version_data.get("version", "N/A")
+                    sha = version_data.get("commit_sha", "")
+                    if sha:
+                        commit_sha = sha[:7]
         except Exception:
             version = "N/A"
 
-        version_label = QLabel(f"Application Version: {version}", self)
+        ver_text = f"Application Version: {version}"
+        if commit_sha:
+            ver_text += f"  ({commit_sha})"
+        version_label = QLabel(ver_text, self)
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("color: white; font-size: 24px; background-color: black; border-radius: 10px;")
         main_layout.addWidget(version_label)
