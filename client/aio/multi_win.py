@@ -51,7 +51,7 @@ class AdOverlay(QWidget):
         label.setAlignment(Qt.AlignCenter)
         label.setStyleSheet("color: white; font-size: 36px;")
         layout.addWidget(label)
-CAROUSEL_ANIM_MS = 280
+CAROUSEL_ANIM_MS = 180
 CAROUSEL_COMMIT_MS = 180
 CAROUSEL_IDLE_ROTATE_MS = 1500
 CAROUSEL_IDLE_DELAY_MS = 10000

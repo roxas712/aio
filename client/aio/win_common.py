@@ -184,6 +184,13 @@ DEFAULT_GAMES: List[Dict[str, Any]] = [
         "orientation": "landscape",
     },
     {
+        "title": "Fortune 2 Go",
+        "type": "url",
+        "target": "",
+        "img": str(KIOSK_DIR / "img" / "fortune2go.png"),
+        "orientation": "vertical",
+    },
+    {
         "title": "Golden Dragon",
         "type": "url",
         "target": "https://www.goldendragoncity.com/",
@@ -647,13 +654,20 @@ def sync_config_from_server() -> Dict[str, Any]:
                     None,
                 )
                 if match:
-                    filtered.append(match)
+                    entry = dict(match)
+                    # Let server URL override if DEFAULT_GAMES has empty target
+                    if sg.get("url") and not entry.get("target"):
+                        entry["target"] = sg["url"]
+                    filtered.append(entry)
                 else:
+                    # Try to find local image by sanitized title
+                    sanitized = raw_title.lower().replace(" ", "")
+                    local_img = KIOSK_DIR / "img" / f"{sanitized}.png"
                     filtered.append({
                         "title": sg.get("title") or "Unknown",
                         "type": "url",
                         "target": sg.get("url") or "",
-                        "img": sg.get("img") or "",
+                        "img": str(local_img) if local_img.exists() else (sg.get("img") or ""),
                     })
             if filtered:
                 result["games"] = filtered
