@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import QWidget
 
 from PyQt5.QtCore import Qt, QSize, QEvent, QTimer, QEasingCurve, QRectF
 from PyQt5.QtWidgets import QToolButton
-from PyQt5.QtCore import QPropertyAnimation, QPoint
+from PyQt5.QtCore import QPropertyAnimation, QPoint, QRect
 from PyQt5.QtGui import QPixmap, QPainter, QPainterPath, QPen, QFont, QMovie, QColor
 from PyQt5.QtWidgets import (
     QApplication,
@@ -130,7 +130,40 @@ class CarouselWidget(QWidget):
         self.idle_timer = QTimer(self)
         self.user_activity_timer = QTimer(self)
 
-    def _build_cards(self, animate=False):
+    def _calc_x_offsets(self):
+        """Calculate X offset positions for each carousel slot."""
+        cx = self.card_container.width() // 2
+        GAP = self.gap
+        half = self.num_visible // 2
+        inner = (self.center_size.width() // 2) + (self.side_size.width() // 2) + GAP
+
+        offsets = {0: 0, -1: -inner, 1: inner}
+        if self.num_visible >= 5:
+            outer_card_w = int(self.side_size.width() * 0.75)
+            outer = inner + (self.side_size.width() // 2) + (outer_card_w // 2) + GAP
+            offsets[-2] = -outer
+            offsets[2] = outer
+            # Off-screen positions for slide animation entry/exit
+            offscreen = outer + outer_card_w + abs(GAP)
+            offsets[-3] = -offscreen
+            offsets[3] = offscreen
+        else:
+            offscreen = inner + self.side_size.width() + abs(GAP)
+            offsets[-2] = -offscreen
+            offsets[2] = offscreen
+        return offsets
+
+    def _size_for_offset(self, offset):
+        """Return (QSize, opacity) for a given carousel slot offset."""
+        if offset == CAROUSEL_CENTER_OFFSET:
+            return self.center_size, 1.0
+        elif abs(offset - CAROUSEL_CENTER_OFFSET) == 1:
+            return self.side_size, SIDE_OPACITY
+        else:
+            return QSize(int(self.side_size.width() * 0.75),
+                         int(self.side_size.height() * 0.75)), 0.35
+
+    def _build_cards(self, animate=False, direction=0):
         # Guard against empty game list (prevent silent failure)
         if not self.games:
             return
@@ -144,18 +177,9 @@ class CarouselWidget(QWidget):
             child.setParent(None)
             child.deleteLater()
 
-        # Edge‑based spacing (center ↔ side ↔ outer)
         cx = self.card_container.width() // 2
-        GAP = self.gap
-        half = self.num_visible // 2  # 2 for 5-card, 1 for 3-card
-        inner = (self.center_size.width() // 2) + (self.side_size.width() // 2) + GAP
-
-        X_OFFSETS = {0: 0, -1: -inner, 1: inner}
-        if self.num_visible >= 5:
-            outer_card_w = int(self.side_size.width() * 0.75)
-            outer = inner + (self.side_size.width() // 2) + (outer_card_w // 2) + GAP
-            X_OFFSETS[-2] = -outer
-            X_OFFSETS[2] = outer
+        X_OFFSETS = self._calc_x_offsets()
+        half = self.num_visible // 2
 
         # Anchor cards to container center only (no external lift)
         cy_visual_center = self.card_container.height() // 2
@@ -172,27 +196,26 @@ class CarouselWidget(QWidget):
             )
             btn.enable_hover = False
             btn._callback = None
-            # No click or hover in attract mode
 
-            if offset == CAROUSEL_CENTER_OFFSET:
-                size = self.center_size
-                opacity = 1.0
-                btn.setGraphicsEffect(None)  # ensure no effect masks rounding
-            elif abs(offset - CAROUSEL_CENTER_OFFSET) == 1:
-                size = self.side_size
-                opacity = SIDE_OPACITY
-            else:
-                size = QSize(int(self.side_size.width()*0.75), int(self.side_size.height()*0.75))
-                opacity = 0.35
-
+            size, opacity = self._size_for_offset(offset)
             btn.resize(size)
-            btn.setWindowOpacity(opacity)
 
-            # Edge-based X position
-            x = cx + X_OFFSETS[offset] - size.width() // 2
-            # Anchor Y to container center only (no clamp)
-            y = cy_visual_center - size.height() // 2
-            btn.move(int(x), int(y))
+            if animate and direction != 0:
+                # Place at previous position (shifted by direction) for slide-in
+                start_slot = offset + direction
+                start_size, start_opacity = self._size_for_offset(start_slot)
+                btn.resize(start_size)
+                btn.setWindowOpacity(start_opacity)
+                start_x = cx + X_OFFSETS.get(start_slot, X_OFFSETS.get(
+                    3 if start_slot > 0 else -3, 0)) - start_size.width() // 2
+                start_y = cy_visual_center - start_size.height() // 2
+                btn.move(int(start_x), int(start_y))
+            else:
+                btn.setWindowOpacity(opacity)
+                x = cx + X_OFFSETS[offset] - size.width() // 2
+                y = cy_visual_center - size.height() // 2
+                btn.move(int(x), int(y))
+
             btn.show()
             self.buttons.append(btn)
 
@@ -200,53 +223,34 @@ class CarouselWidget(QWidget):
         for i in sorted(range(len(self.buttons)), key=lambda i: -abs(i - half)):
             self.buttons[i].raise_()
 
-        if animate:
+        if animate and direction != 0:
             self._animate_cards()
 
         self._cards_initialized = True
 
     def _animate_cards(self):
-        # Edge‑based spacing (center ↔ side ↔ outer)
         cx = self.card_container.width() // 2
-        GAP = self.gap
+        X_OFFSETS = self._calc_x_offsets()
         half = self.num_visible // 2
-        inner = (self.center_size.width() // 2) + (self.side_size.width() // 2) + GAP
-
-        X_OFFSETS = {0: 0, -1: -inner, 1: inner}
-        if self.num_visible >= 5:
-            outer_card_w = int(self.side_size.width() * 0.75)
-            outer = inner + (self.side_size.width() // 2) + (outer_card_w // 2) + GAP
-            X_OFFSETS[-2] = -outer
-            X_OFFSETS[2] = outer
-
-        # Anchor cards to container center only (no external lift)
         cy_visual_center = self.card_container.height() // 2
 
         for i, btn in enumerate(self.buttons):
             offset = i - half
+            size, opacity = self._size_for_offset(offset)
 
-            if offset == 0:
-                size = self.center_size
-                opacity = 1.0
-            elif abs(offset) == 1:
-                size = self.side_size
-                opacity = SIDE_OPACITY
-            else:
-                size = QSize(int(self.side_size.width() * 0.75), int(self.side_size.height() * 0.75))
-                opacity = 0.35
-
-            # Edge-based X position
             target_x = cx + X_OFFSETS[offset] - size.width() // 2
-            # Anchor Y to container center only (no clamp)
             target_y = cy_visual_center - size.height() // 2
 
-            pos_anim = QPropertyAnimation(btn, b"pos", self)
-            pos_anim.setDuration(CAROUSEL_ANIM_MS)
-            pos_anim.setEndValue(QPoint(int(target_x), int(target_y)))
-            pos_anim.setEasingCurve(QEasingCurve.OutCubic)
-            pos_anim.start()
+            # Animate position + size together via geometry
+            geo_anim = QPropertyAnimation(btn, b"geometry", self)
+            geo_anim.setDuration(CAROUSEL_ANIM_MS)
+            geo_anim.setEndValue(
+                QRect(int(target_x), int(target_y), size.width(), size.height())
+            )
+            geo_anim.setEasingCurve(QEasingCurve.OutCubic)
+            geo_anim.start()
 
-            # Only animate opacity for non-center cards; direct set for center
+            # Animate opacity
             if offset != 0:
                 fade = QPropertyAnimation(btn, b"windowOpacity", self)
                 fade.setDuration(CAROUSEL_ANIM_MS)
@@ -276,7 +280,7 @@ class CarouselWidget(QWidget):
 
     def _rotate_once(self):
         self.index = (self.index + 1) % len(self.games)
-        self._build_cards(animate=True)
+        self._build_cards(animate=True, direction=1)
 
     def _start_center_glow(self, btn, color):
         self._glow_anim = QPropertyAnimation(btn, b"windowOpacity", self)
@@ -346,13 +350,13 @@ class CarouselWidget(QWidget):
         self.idle_timer.stop()
         self.user_activity_timer.start()
         self.index = (self.index + 1) % len(self.games)
-        self._build_cards(animate=True)
+        self._build_cards(animate=True, direction=1)
 
     def prev_game(self):
         self.idle_timer.stop()
         self.user_activity_timer.start()
         self.index = (self.index - 1) % len(self.games)
-        self._build_cards(animate=True)
+        self._build_cards(animate=True, direction=-1)
 
 from win_common import (
     load_games,
@@ -1197,19 +1201,15 @@ class GridMenu(QWidget):
     def _update_nav(self):
         self.page_stack.setCurrentIndex(self.current_page)
         if self.total_pages > 1:
-            self.prev_btn.setEnabled(self.current_page > 0)
-            self.next_btn.setEnabled(self.current_page < self.total_pages - 1)
             self.page_label.setText(f"{self.current_page + 1} / {self.total_pages}")
 
     def _prev_page(self):
-        if self.current_page > 0:
-            self.current_page -= 1
-            self._update_nav()
+        self.current_page = (self.current_page - 1) % self.total_pages
+        self._update_nav()
 
     def _next_page(self):
-        if self.current_page < self.total_pages - 1:
-            self.current_page += 1
-            self._update_nav()
+        self.current_page = (self.current_page + 1) % self.total_pages
+        self._update_nav()
 
 
 class MainMenu(QWidget):
@@ -1533,7 +1533,7 @@ class MainWindow(QMainWindow):
 
         # Grid idle timer (10 seconds on grid view)
         self.grid_idle_timer = QTimer(self)
-        self.grid_idle_timer.setInterval(10_000)  # 10 seconds
+        self.grid_idle_timer.setInterval(30_000)  # 30 seconds
         self.grid_idle_timer.setSingleShot(True)
         self.grid_idle_timer.timeout.connect(self._grid_idle_return)
 
