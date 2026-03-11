@@ -591,13 +591,19 @@ class VerticalMultiWindow(MainWindow):
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)  # QWIDGETSIZE_MAX
 
-        # Store reference to original multi UI root
+        # Store reference to original multi UI root and replace the
+        # QMainWindow central widget with a transparent placeholder.
+        # Without this, QMainWindow's internal layout frame paints an
+        # opaque background that obscures manually-positioned children.
         self._multi_root = self.centralWidget()
-        log_debug(f"[VERT] centralWidget: {self._multi_root}, visible={self._multi_root.isVisible() if self._multi_root else 'N/A'}")
+        placeholder = QWidget()
+        placeholder.setAttribute(Qt.WA_TranslucentBackground)
+        placeholder.setStyleSheet("background: transparent;")
+        self.setCentralWidget(placeholder)
         self._multi_root.setParent(self)
-        log_debug(f"[VERT] After reparent: visible={self._multi_root.isVisible()}")
         self._multi_root.show()
         self._multi_root.raise_()
+        log_debug(f"[VERT] _multi_root reparented, visible={self._multi_root.isVisible()}")
 
         # Remove MainWindow's simple "AD SPACE" placeholder overlay.
         # MainWindow creates it when terminal_type == "multi_vert" — we replace
@@ -815,6 +821,7 @@ QPushButton:hover {
 
         self._multi_root.setGeometry(0, game_y, screen_w, game_area_height)
         self._multi_root.setFixedSize(screen_w, game_area_height)
+        self._multi_root.raise_()
 
     def _enforce_bottom_layout(self):
         screen_w = self.width()
