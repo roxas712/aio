@@ -1145,6 +1145,10 @@ class GridMenu(QWidget):
                 btn.setClickedCallback(lambda g=game: self.on_game_selected(g))
                 grid.addWidget(btn, i // self.COLS, i % self.COLS)
 
+            # Push items to top so partial pages don't stretch vertically
+            rows_used = (len(page_games) + self.COLS - 1) // self.COLS
+            grid.setRowStretch(rows_used, 1)
+
             self.page_stack.addWidget(page_widget)
 
         outer.addWidget(self.page_stack, 1)

@@ -592,12 +592,17 @@ QPushButton:hover {
             parent=self.main_menu,
             center_size=QSize(160, 240),
             side_size=QSize(120, 180),
-            container_size=QSize(960, 300),
+            container_size=QSize(860, 300),
             num_visible=5,
         )
+        # Center card_container by adding stretches on both sides of HBoxLayout
+        carousel_layout = new_carousel.layout()
+        carousel_layout.setContentsMargins(0, 5, 0, 5)
+        carousel_layout.insertStretch(0, 1)
+        carousel_layout.addStretch(1)
         self.main_menu.carousel = new_carousel
-        # Insert after the top stretch (index 1)
-        self.main_menu.layout().insertWidget(1, new_carousel, alignment=Qt.AlignHCenter)
+        # Insert without alignment constraint so widget fills available width
+        self.main_menu.layout().insertWidget(1, new_carousel)
 
     def _on_volume_changed(self, vol):
         if self.ad_overlay:
