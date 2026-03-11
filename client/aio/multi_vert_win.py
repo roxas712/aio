@@ -683,23 +683,8 @@ QPushButton:hover {
         except Exception:
             pass
 
-        # Diagnostic: log child widget state
-        log_debug(f"[VERT] bg_label geo: {self.bg_label.width()}x{self.bg_label.height()} "
-                  f"visible={self.bg_label.isVisible()}")
-        log_debug(f"[VERT] stack geo: {self.stack.width()}x{self.stack.height()} "
-                  f"visible={self.stack.isVisible()}")
-        log_debug(f"[VERT] _multi_root layout active={self._multi_root.layout().isEnabled() if self._multi_root.layout() else 'NO LAYOUT'}")
         log_debug(f"[VERT] __init__ complete. games={len(self.games) if self.games else 0}, "
                   f"has_carousel={hasattr(self.main_menu, 'carousel')}")
-
-        # DEBUG: bright test widget to verify rendering in bottom 40%
-        self._test_widget = QLabel("RENDER TEST", self)
-        self._test_widget.setGeometry(100, 1300, 300, 100)
-        self._test_widget.setStyleSheet(
-            "background-color: red; color: white; font-size: 32px; font-weight: bold;"
-        )
-        self._test_widget.show()
-        self._test_widget.raise_()
 
     def _apply_new_games(self, new_games: list):
         """Override: rebuild game UI then re-apply vertical-specific adjustments."""
@@ -792,25 +777,22 @@ QPushButton:hover {
         # Ensure widgets are visible after fullscreen reapply
         if self._multi_root:
             self._multi_root.show()
-            log_debug(f"[VERT] After reapply: _multi_root geo={self._multi_root.geometry().x()},{self._multi_root.geometry().y()} "
-                      f"{self._multi_root.width()}x{self._multi_root.height()} visible={self._multi_root.isVisible()}")
         if self.ad_overlay:
             self.ad_overlay.show()
-            log_debug(f"[VERT] After reapply: ad_overlay geo={self.ad_overlay.geometry().x()},{self.ad_overlay.geometry().y()} "
-                      f"{self.ad_overlay.width()}x{self.ad_overlay.height()} visible={self.ad_overlay.isVisible()}")
-        # Check stack/main_menu visibility
-        if hasattr(self, 'stack'):
-            log_debug(f"[VERT] stack visible={self.stack.isVisible()}, currentWidget={self.stack.currentWidget()}")
-        if hasattr(self, 'main_menu'):
-            log_debug(f"[VERT] main_menu visible={self.main_menu.isVisible()}, "
-                      f"size={self.main_menu.width()}x{self.main_menu.height()}")
+        log_debug(f"[VERT] After reapply: root={self._multi_root.geometry().y()},{self._multi_root.height()} "
+                  f"ad={self.ad_overlay.height()}")
 
     # --------------------------------------------------
     # Geometry Handling
     # --------------------------------------------------
 
     def resizeEvent(self, event):
-        super().resizeEvent(event)
+        # IMPORTANT: Do NOT call MainWindow.resizeEvent (super()).
+        # MainWindow.resizeEvent sets bg_label to the full 1920px window
+        # height (inside _multi_root which is only 768px) and positions
+        # ad_overlay at 40% instead of 60%.  This fights with vertical
+        # layout and eventually causes a permanent black screen.
+        event.accept()
         self._update_ad_geometry()
         self._position_volume_button()
 
