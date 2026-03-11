@@ -16,3 +16,6 @@ build/
 
 # Claude Code
 .claude/
+
+# Secrets (deployed outside repo)
+github_token.txt

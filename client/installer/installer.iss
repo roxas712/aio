@@ -85,6 +85,9 @@ Source: "C:\AIOv2\kiosk\set_portrait.py";   DestDir: "{app}\kiosk"; Flags: ignor
 ; --- Deploy script (for remote OTA updates) ---
 Source: "C:\AIOv2\deploy.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
+; --- GitHub token for auto-updater (private repo access) ---
+Source: "C:\AIOv2\config\github_token.txt"; DestDir: "{app}\config"; Flags: ignoreversion
+
 ; --- Images / assets ---
 Source: "C:\AIOv2\kiosk\img\*";  DestDir: "{app}\kiosk\img"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "C:\AIOv2\kiosk\vids\*"; DestDir: "{app}\kiosk\vids"; Flags: ignoreversion recursesubdirs createallsubdirs
