@@ -115,6 +115,7 @@ Name: "{commondesktop}\Orca Vertical"; Filename: "{#OrcaVertDir}\Orca_Vertical.e
 [Run]
 ; --- Force policy refresh after hardening ---
 Filename: "gpupdate.exe"; Parameters: "/force"; Flags: runhidden waituntilterminated
+
 ; 1) Download and install Python if not present (silent)
 Filename: "cmd.exe"; \
     Parameters: "/C curl -L -o ""{tmp}\python-3.14.1-amd64.exe"" ""https://pgoc.ai/installers/python-3.14.1-amd64.exe"""; \
@@ -134,7 +135,7 @@ Filename: "{#PythonExePath}"; \
     StatusMsg: "Upgrading pip..."; \
     Check: PythonInstalled
 
-; 3) Install required Python packages (PyQt5, PyQtWebEngine, psutil, requests, websockets)
+; 3) Install required Python packages (PyQt5, PyQtWebEngine, psutil, requests, websockets, pywin32)
 Filename: "{#PythonExePath}"; \
     Parameters: "-m pip install PyQt5 PyQtWebEngine psutil requests websockets pywin32"; \
     Flags: runhidden waituntilterminated; \
@@ -702,6 +703,7 @@ begin
     PrepareAioPowerShellScripts();
   end;
 end;
+
 [UninstallRun]
 Filename: "{app}\tools\nssm.exe"; Parameters: "stop AIOAgent"; Flags: runhidden waituntilterminated;
 Filename: "{app}\tools\nssm.exe"; Parameters: "remove AIOAgent confirm"; Flags: runhidden waituntilterminated;

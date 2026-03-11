@@ -226,7 +226,7 @@ def download_repo_zip() -> bool:
         log(f"[INFO] Downloading repo archive...")
         ZIP_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-        resp = requests.get(ARCHIVE_URL, headers=GITHUB_HEADERS, stream=True, timeout=120)
+        resp = requests.get(ARCHIVE_URL, headers=_get_github_headers(), stream=True, timeout=120)
         resp.raise_for_status()
 
         with ZIP_PATH.open("wb") as f:
