@@ -593,7 +593,10 @@ class VerticalMultiWindow(MainWindow):
 
         # Store reference to original multi UI root
         self._multi_root = self.centralWidget()
+        log_debug(f"[VERT] centralWidget: {self._multi_root}, visible={self._multi_root.isVisible() if self._multi_root else 'N/A'}")
         self._multi_root.setParent(self)
+        log_debug(f"[VERT] After reparent: visible={self._multi_root.isVisible()}")
+        self._multi_root.show()
         self._multi_root.raise_()
 
         # Remove MainWindow's simple "AD SPACE" placeholder overlay.
@@ -614,10 +617,17 @@ class VerticalMultiWindow(MainWindow):
         # Create Ad Overlay
         self.ad_overlay = AdLoopWidget(self)
         self._update_ad_geometry()
+        self.ad_overlay.show()
 
         ads_folder = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "ads"
         self.ad_overlay.load_ads(ads_folder)
         self.ad_overlay.raise_()
+
+        log_debug(f"[VERT] Window size: {self.width()}x{self.height()}")
+        log_debug(f"[VERT] _multi_root geo: {self._multi_root.geometry().x()},{self._multi_root.geometry().y()} "
+                  f"{self._multi_root.width()}x{self._multi_root.height()} visible={self._multi_root.isVisible()}")
+        log_debug(f"[VERT] ad_overlay geo: {self.ad_overlay.geometry().x()},{self.ad_overlay.geometry().y()} "
+                  f"{self.ad_overlay.width()}x{self.ad_overlay.height()} visible={self.ad_overlay.isVisible()}")
 
         # Volume control button (upper-right of ad area)
         self._volume_btn = VolumeButton(
@@ -653,12 +663,21 @@ QPushButton:hover {
                 grid_layout.setContentsMargins(20, 20, 20, 20)
                 grid_layout.setSpacing(15)
 
+        # Ensure stack and main_menu are visible
+        if hasattr(self, 'stack'):
+            self.stack.show()
+        if hasattr(self, 'main_menu'):
+            self.main_menu.show()
+
         # Enforce layout whenever stacked content changes
         try:
             if hasattr(self, 'stack'):
                 self.stack.currentChanged.connect(self._enforce_bottom_layout)
         except Exception:
             pass
+
+        log_debug(f"[VERT] __init__ complete. games={len(self.games) if self.games else 0}, "
+                  f"has_carousel={hasattr(self.main_menu, 'carousel')}")
 
     def _apply_new_games(self, new_games: list):
         """Override: rebuild game UI then re-apply vertical-specific adjustments."""
@@ -741,11 +760,28 @@ QPushButton:hover {
 
     def _reapply_fullscreen(self):
         screen = self.screen().geometry()
+        log_debug(f"[VERT] _reapply_fullscreen screen={screen.width()}x{screen.height()} at ({screen.x()},{screen.y()})")
         self.setGeometry(screen)
         self.showFullScreen()
         self._update_ad_geometry()
         self._enforce_bottom_layout()
         self._position_volume_button()
+
+        # Ensure widgets are visible after fullscreen reapply
+        if self._multi_root:
+            self._multi_root.show()
+            log_debug(f"[VERT] After reapply: _multi_root geo={self._multi_root.geometry().x()},{self._multi_root.geometry().y()} "
+                      f"{self._multi_root.width()}x{self._multi_root.height()} visible={self._multi_root.isVisible()}")
+        if self.ad_overlay:
+            self.ad_overlay.show()
+            log_debug(f"[VERT] After reapply: ad_overlay geo={self.ad_overlay.geometry().x()},{self.ad_overlay.geometry().y()} "
+                      f"{self.ad_overlay.width()}x{self.ad_overlay.height()} visible={self.ad_overlay.isVisible()}")
+        # Check stack/main_menu visibility
+        if hasattr(self, 'stack'):
+            log_debug(f"[VERT] stack visible={self.stack.isVisible()}, currentWidget={self.stack.currentWidget()}")
+        if hasattr(self, 'main_menu'):
+            log_debug(f"[VERT] main_menu visible={self.main_menu.isVisible()}, "
+                      f"size={self.main_menu.width()}x{self.main_menu.height()}")
 
     # --------------------------------------------------
     # Geometry Handling
