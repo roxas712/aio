@@ -240,14 +240,14 @@ class AdLoopWidget(QWidget):
         if self._fallback_label:
             return  # Already showing fallback
 
-        # Disconnect error signal; do NOT call stop() (causes C++ stack overflow)
+        # Disconnect error signal; do NOT call stop()/hide() on video_widget
+        # — both trigger DirectShow re-entry at C level causing stack overflow.
         if self.player:
             try:
                 self.player.error.disconnect(self._on_player_error)
             except Exception:
                 pass
-        if self.video_widget:
-            self.video_widget.hide()
+            self.player.setMuted(True)
 
         self._fallback_label = QLabel(self)
         self._fallback_label.setAlignment(Qt.AlignCenter)
@@ -268,6 +268,25 @@ class AdLoopWidget(QWidget):
             )
 
         self._layout.addWidget(self._fallback_label)
+        self._fallback_label.raise_()
+
+        # Defer video widget cleanup to avoid DirectShow crash
+        QTimer.singleShot(2000, self._safe_cleanup_video)
+
+    def _safe_cleanup_video(self):
+        """Deferred cleanup of video widget/player after fallback is shown."""
+        try:
+            if self.player:
+                self.player.setMedia(QMediaContent())  # unload media
+                self.player.deleteLater()
+                self.player = None
+            if self.video_widget:
+                self.video_widget.setParent(None)
+                self.video_widget.deleteLater()
+                self.video_widget = None
+            log_debug("[AD] Video widget safely cleaned up")
+        except Exception as e:
+            log_debug(f"[AD] Video cleanup error (non-fatal): {e}")
 
     def _on_player_error(self, error):
         """Handle media player errors without crashing the app."""
@@ -608,14 +627,19 @@ class VerticalMultiWindow(MainWindow):
         # Force terminal type
         self.terminal_type = "multi_vert"
 
+        # Use actual screen geometry for initial sizing (self.height() may
+        # return DPI-scaled or primary-monitor values before fullscreen settles)
+        _screen = self.screen().geometry()
+        _init_w, _init_h = _screen.width(), _screen.height()
+
         # Push game content (bg_label + stack) to bottom 40% via margin
-        ad_height = int((self.height() or 1920) * AD_RATIO)
+        ad_height = int(_init_h * AD_RATIO)
         if self._multi_root.layout():
             self._multi_root.layout().setContentsMargins(0, ad_height, 0, 0)
 
         # Create Ad Overlay as child of central widget (covers top 60%)
         self.ad_overlay = AdLoopWidget(self._multi_root)
-        self.ad_overlay.setGeometry(0, 0, self.width() or 1080, ad_height)
+        self.ad_overlay.setGeometry(0, 0, _init_w, ad_height)
         self.ad_overlay.show()
         self.ad_overlay.raise_()
 
