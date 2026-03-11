@@ -447,6 +447,20 @@ def launch_activation() -> None:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def wait_for_network(max_wait: int = 60) -> bool:
+    """Wait up to max_wait seconds for network to become available."""
+    log(f"[INFO] Waiting for network (up to {max_wait}s)...")
+    for i in range(max_wait):
+        try:
+            requests.head("https://api.github.com", timeout=3)
+            log(f"[INFO] Network ready after {i}s")
+            return True
+        except Exception:
+            time.sleep(1)
+    log("[WARN] Network not available after timeout")
+    return False
+
+
 def main():
     log("=== AIO Auto-Updater (GitHub) ===")
 
@@ -455,6 +469,9 @@ def main():
     has_token = "Authorization" in headers
     log(f"[INFO] GitHub token: {'found' if has_token else 'MISSING'} ({GITHUB_TOKEN_FILE})")
     log(f"[INFO] Target API: {GITHUB_API_URL}")
+
+    # Wait for network before checking updates (runs early at boot)
+    wait_for_network()
 
     local_sha = get_local_commit_sha()
     if local_sha:
