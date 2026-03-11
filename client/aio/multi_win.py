@@ -1123,13 +1123,31 @@ class GridMenu(QWidget):
         outer.setContentsMargins(20, 20, 20, 20)
         outer.setSpacing(10)
 
-        # Grid area
-        self.grid_container = QWidget(self)
-        self.grid_container.setAttribute(Qt.WA_TranslucentBackground)
-        self.grid_layout = QGridLayout(self.grid_container)
-        self.grid_layout.setContentsMargins(40, 40, 40, 40)
-        self.grid_layout.setSpacing(30)
-        outer.addWidget(self.grid_container, 1)
+        # Pre-build all pages in a stacked widget
+        self.page_stack = QStackedWidget(self)
+        self.page_stack.setAttribute(Qt.WA_TranslucentBackground)
+        for page_idx in range(self.total_pages):
+            page_widget = QWidget(self.page_stack)
+            page_widget.setAttribute(Qt.WA_TranslucentBackground)
+            grid = QGridLayout(page_widget)
+            grid.setContentsMargins(40, 40, 40, 40)
+            grid.setSpacing(30)
+
+            start = page_idx * self.GAMES_PER_PAGE
+            page_games = self.games[start:start + self.GAMES_PER_PAGE]
+            for i, game in enumerate(page_games):
+                btn = BlurImageButton(
+                    title=game["title"],
+                    img_path=game.get("img") or "",
+                    parent=page_widget
+                )
+                btn.enable_hover = True
+                btn.setClickedCallback(lambda g=game: self.on_game_selected(g))
+                grid.addWidget(btn, i // self.COLS, i % self.COLS)
+
+            self.page_stack.addWidget(page_widget)
+
+        outer.addWidget(self.page_stack, 1)
 
         # Navigation row
         if self.total_pages > 1:
@@ -1165,32 +1183,10 @@ class GridMenu(QWidget):
             nav_row.addStretch()
             outer.addLayout(nav_row)
 
-        self._build_page()
+        self._update_nav()
 
-    def _build_page(self):
-        # Clear existing widgets
-        while self.grid_layout.count():
-            item = self.grid_layout.takeAt(0)
-            if item.widget():
-                item.widget().setParent(None)
-                item.widget().deleteLater()
-
-        start = self.current_page * self.GAMES_PER_PAGE
-        page_games = self.games[start:start + self.GAMES_PER_PAGE]
-
-        for i, game in enumerate(page_games):
-            btn = BlurImageButton(
-                title=game["title"],
-                img_path=game.get("img") or "",
-                parent=self.grid_container
-            )
-            btn.enable_hover = True
-            btn.setClickedCallback(lambda g=game: self.on_game_selected(g))
-            r = i // self.COLS
-            c = i % self.COLS
-            self.grid_layout.addWidget(btn, r, c)
-
-        # Update nav buttons
+    def _update_nav(self):
+        self.page_stack.setCurrentIndex(self.current_page)
         if self.total_pages > 1:
             self.prev_btn.setEnabled(self.current_page > 0)
             self.next_btn.setEnabled(self.current_page < self.total_pages - 1)
@@ -1199,12 +1195,12 @@ class GridMenu(QWidget):
     def _prev_page(self):
         if self.current_page > 0:
             self.current_page -= 1
-            self._build_page()
+            self._update_nav()
 
     def _next_page(self):
         if self.current_page < self.total_pages - 1:
             self.current_page += 1
-            self._build_page()
+            self._update_nav()
 
 
 class MainMenu(QWidget):

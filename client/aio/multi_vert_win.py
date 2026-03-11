@@ -298,17 +298,11 @@ class VerticalManagerPage(QWidget):
         super().__init__(parent)
         self.setObjectName("VerticalManagerPage")
 
-        # Use admin_bg.jpg as background if available
+        # Load admin_bg.jpg for paintEvent background
         bg_path = AIO_ROOT / "kiosk" / "img" / "admin_bg.jpg"
+        self._bg_pixmap = None
         if bg_path.exists():
-            safe_path = str(bg_path).replace("\\", "/")
-            self.setStyleSheet(
-                f'#{self.objectName()} {{ '
-                f'background-image: url("{safe_path}"); '
-                f'background-repeat: no-repeat; '
-                f'background-position: center; '
-                f'}}'
-            )
+            self._bg_pixmap = QPixmap(str(bg_path).replace("\\", "/"))
         else:
             self.setStyleSheet("background-color: #1a1a2e;")
 
@@ -412,6 +406,19 @@ class VerticalManagerPage(QWidget):
         """)
         back_btn.clicked.connect(self._return_to_menu)
         layout.addWidget(back_btn)
+
+    def paintEvent(self, event):
+        if self._bg_pixmap:
+            painter = QPainter(self)
+            scaled = self._bg_pixmap.scaled(
+                self.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+            )
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawPixmap(x, y, scaled)
+            painter.end()
+        else:
+            super().paintEvent(event)
 
     def _relaunch(self):
         try:
@@ -583,9 +590,9 @@ QPushButton:hover {
             games=self.games,
             on_select=self.main_menu._game_selected,
             parent=self.main_menu,
-            center_size=QSize(200, 300),
-            side_size=QSize(150, 225),
-            container_size=QSize(1040, 360),
+            center_size=QSize(160, 240),
+            side_size=QSize(120, 180),
+            container_size=QSize(960, 300),
             num_visible=5,
         )
         self.main_menu.carousel = new_carousel
