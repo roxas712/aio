@@ -135,8 +135,8 @@ def get_remote_commit_sha() -> str:
         else:
             log(f"[WARN] GitHub API returned HTTP {resp.status_code}")
             return ""
-    except requests.exceptions.ConnectionError:
-        log("[WARN] No internet connection (ConnectionError)")
+    except requests.exceptions.ConnectionError as e:
+        log(f"[WARN] ConnectionError reaching GitHub API: {e}")
         return ""
     except requests.exceptions.Timeout:
         log("[WARN] GitHub API request timed out")
@@ -449,6 +449,12 @@ def launch_activation() -> None:
 
 def main():
     log("=== AIO Auto-Updater (GitHub) ===")
+
+    # Diagnostics
+    headers = _get_github_headers()
+    has_token = "Authorization" in headers
+    log(f"[INFO] GitHub token: {'found' if has_token else 'MISSING'} ({GITHUB_TOKEN_FILE})")
+    log(f"[INFO] Target API: {GITHUB_API_URL}")
 
     local_sha = get_local_commit_sha()
     if local_sha:
