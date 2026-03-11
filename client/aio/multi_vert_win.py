@@ -297,7 +297,20 @@ class VerticalManagerPage(QWidget):
     def __init__(self, parent=None, advanced=False):
         super().__init__(parent)
         self.setObjectName("VerticalManagerPage")
-        self.setStyleSheet("background-color: #1a1a2e;")
+
+        # Use admin_bg.jpg as background if available
+        bg_path = AIO_ROOT / "kiosk" / "img" / "admin_bg.jpg"
+        if bg_path.exists():
+            safe_path = str(bg_path).replace("\\", "/")
+            self.setStyleSheet(
+                f'#{self.objectName()} {{ '
+                f'background-image: url("{safe_path}"); '
+                f'background-repeat: no-repeat; '
+                f'background-position: center; '
+                f'}}'
+            )
+        else:
+            self.setStyleSheet("background-color: #1a1a2e;")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 15, 20, 15)
@@ -350,7 +363,8 @@ class VerticalManagerPage(QWidget):
         layout.addWidget(ver_label)
 
         hw_id = get_client_uuid() or "N/A"
-        hw_label = QLabel(f"HW ID: {hw_id[:24]}..." if len(hw_id) > 24 else f"HW ID: {hw_id}", self)
+        hw_label = QLabel(f"HW ID: {hw_id}", self)
+        hw_label.setWordWrap(True)
         hw_label.setAlignment(Qt.AlignCenter)
         hw_label.setStyleSheet(info_style)
         layout.addWidget(hw_label)
@@ -569,10 +583,10 @@ QPushButton:hover {
             games=self.games,
             on_select=self.main_menu._game_selected,
             parent=self.main_menu,
-            center_size=QSize(240, 360),
-            side_size=QSize(180, 270),
-            container_size=QSize(1000, 420),
-            num_visible=3,
+            center_size=QSize(200, 300),
+            side_size=QSize(150, 225),
+            container_size=QSize(1040, 360),
+            num_visible=5,
         )
         self.main_menu.carousel = new_carousel
         # Insert after the top stretch (index 1)

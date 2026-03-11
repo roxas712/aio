@@ -1107,26 +1107,104 @@ class ManagerPage(QWidget):
 
 # --- GridMenu page ---
 class GridMenu(QWidget):
+    GAMES_PER_PAGE = 12
+    COLS = 4
+
     def __init__(self, on_game_selected, games, parent=None):
         super().__init__(parent)
         self.on_game_selected = on_game_selected
+        self.games = games
+        self.current_page = 0
+        self.total_pages = max(1, -(-len(games) // self.GAMES_PER_PAGE))  # ceil div
 
-        layout = QGridLayout(self)
-        layout.setContentsMargins(60, 60, 60, 60)
-        layout.setSpacing(40)
+        self.setAttribute(Qt.WA_TranslucentBackground)
 
-        cols = 4
-        for i, game in enumerate(games):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 20, 20, 20)
+        outer.setSpacing(10)
+
+        # Grid area
+        self.grid_container = QWidget(self)
+        self.grid_container.setAttribute(Qt.WA_TranslucentBackground)
+        self.grid_layout = QGridLayout(self.grid_container)
+        self.grid_layout.setContentsMargins(40, 40, 40, 40)
+        self.grid_layout.setSpacing(30)
+        outer.addWidget(self.grid_container, 1)
+
+        # Navigation row
+        if self.total_pages > 1:
+            nav_row = QHBoxLayout()
+            nav_row.setSpacing(20)
+
+            arrow_style = """
+                QPushButton {
+                    font-size: 22px; font-weight: bold; padding: 10px 24px;
+                    background-color: rgba(255, 215, 0, 200); color: black;
+                    border-radius: 12px; min-width: 80px;
+                }
+                QPushButton:hover { background-color: #FFEA80; }
+                QPushButton:disabled { background-color: rgba(100, 100, 100, 150); color: #666; }
+            """
+
+            self.prev_btn = QPushButton("\u25C0  Prev", self)
+            self.prev_btn.setStyleSheet(arrow_style)
+            self.prev_btn.clicked.connect(self._prev_page)
+
+            self.page_label = QLabel("", self)
+            self.page_label.setAlignment(Qt.AlignCenter)
+            self.page_label.setStyleSheet("color: white; font-size: 18px; font-weight: bold;")
+
+            self.next_btn = QPushButton("Next  \u25B6", self)
+            self.next_btn.setStyleSheet(arrow_style)
+            self.next_btn.clicked.connect(self._next_page)
+
+            nav_row.addStretch()
+            nav_row.addWidget(self.prev_btn)
+            nav_row.addWidget(self.page_label)
+            nav_row.addWidget(self.next_btn)
+            nav_row.addStretch()
+            outer.addLayout(nav_row)
+
+        self._build_page()
+
+    def _build_page(self):
+        # Clear existing widgets
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+                item.widget().deleteLater()
+
+        start = self.current_page * self.GAMES_PER_PAGE
+        page_games = self.games[start:start + self.GAMES_PER_PAGE]
+
+        for i, game in enumerate(page_games):
             btn = BlurImageButton(
                 title=game["title"],
                 img_path=game.get("img") or "",
-                parent=self
+                parent=self.grid_container
             )
             btn.enable_hover = True
             btn.setClickedCallback(lambda g=game: self.on_game_selected(g))
-            r = i // cols
-            c = i % cols
-            layout.addWidget(btn, r, c)
+            r = i // self.COLS
+            c = i % self.COLS
+            self.grid_layout.addWidget(btn, r, c)
+
+        # Update nav buttons
+        if self.total_pages > 1:
+            self.prev_btn.setEnabled(self.current_page > 0)
+            self.next_btn.setEnabled(self.current_page < self.total_pages - 1)
+            self.page_label.setText(f"{self.current_page + 1} / {self.total_pages}")
+
+    def _prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self._build_page()
+
+    def _next_page(self):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self._build_page()
 
 
 class MainMenu(QWidget):

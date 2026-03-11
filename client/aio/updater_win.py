@@ -35,7 +35,7 @@ STAGING_DIR = PROGRAMDATA_ROOT / "repo"
 ZIP_PATH = PROGRAMDATA_ROOT / "aio-latest.zip"
 TMP_EXTRACT_DIR = PROGRAMDATA_ROOT / "tmp_extract"
 
-VERSION_FILE = KIOSK_DIR / "version.json"
+VERSION_FILE = PROGRAMDATA_ROOT / "config" / "version.json"
 LOG_FILE = PROGRAMDATA_ROOT / "logs" / "updater.log"
 
 PYTHON = Path(r"C:\Program Files\Python314\python.exe")
