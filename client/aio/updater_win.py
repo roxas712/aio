@@ -221,24 +221,32 @@ def start_services() -> None:
 # Download & extract
 # ---------------------------------------------------------------------------
 
-def download_repo_zip() -> bool:
-    try:
-        log(f"[INFO] Downloading repo archive...")
-        ZIP_PATH.parent.mkdir(parents=True, exist_ok=True)
+def download_repo_zip(max_retries: int = 3) -> bool:
+    ZIP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    delays = [10, 30, 60]  # seconds between retries
 
-        resp = requests.get(ARCHIVE_URL, headers=_get_github_headers(), stream=True, timeout=120)
-        resp.raise_for_status()
+    for attempt in range(1, max_retries + 1):
+        try:
+            log(f"[INFO] Downloading repo archive (attempt {attempt}/{max_retries})...")
+            resp = requests.get(ARCHIVE_URL, headers=_get_github_headers(), stream=True, timeout=180)
+            resp.raise_for_status()
 
-        with ZIP_PATH.open("wb") as f:
-            for chunk in resp.iter_content(chunk_size=65536):
-                if chunk:
-                    f.write(chunk)
+            with ZIP_PATH.open("wb") as f:
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
 
-        log(f"[INFO] Downloaded archive ({ZIP_PATH.stat().st_size} bytes)")
-        return True
-    except Exception as e:
-        log(f"[ERROR] Failed to download repo archive: {e}")
-        return False
+            log(f"[INFO] Downloaded archive ({ZIP_PATH.stat().st_size} bytes)")
+            return True
+        except Exception as e:
+            log(f"[ERROR] Download attempt {attempt} failed: {e}")
+            if attempt < max_retries:
+                wait = delays[attempt - 1] if attempt - 1 < len(delays) else delays[-1]
+                log(f"[INFO] Retrying in {wait}s...")
+                time.sleep(wait)
+
+    log("[ERROR] All download attempts failed.")
+    return False
 
 
 def extract_repo_zip() -> bool:
