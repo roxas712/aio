@@ -1301,13 +1301,13 @@ QPushButton:hover {
                     break
 
             if firefox_path:
-                # Kill leftover Firefox so flags apply fresh
+                # Kill ALL leftover Firefox so a fresh instance applies our flags
                 try:
                     subprocess.run(
                         ["taskkill", "/IM", "firefox.exe", "/F"],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     )
-                    import time; time.sleep(0.5)
+                    import time; time.sleep(1.5)
                 except Exception:
                     pass
 
@@ -1325,14 +1325,12 @@ QPushButton:hover {
                         self._store_game_pid(proc.pid, title)
                         self._show_fullscreen_return_button()
                     else:
-                        screen_w, screen_h = self._screen_size()
-                        ad_h = int(screen_h * AD_RATIO)
-                        game_h = screen_h - ad_h
+                        # Use -kiosk to hide all browser UI (address bar,
+                        # tabs, nav buttons).  The constrain step will resize
+                        # the kiosk window into the bottom 40%.
                         proc = subprocess.Popen([
                             firefox_path,
-                            "-new-window",
-                            f"-width", str(screen_w),
-                            f"-height", str(game_h),
+                            "-kiosk",
                             target,
                         ])
                         self._store_game_pid(proc.pid, title)
