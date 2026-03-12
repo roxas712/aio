@@ -1249,6 +1249,7 @@ QPushButton:hover {
                 self._store_game_pid(proc.pid, title)
                 # Store exe name for fallback window matching
                 self._game_exe_name = os.path.basename(target)
+                self._game_is_browser = False
 
                 if is_full_vertical:
                     if self.ad_overlay:
@@ -1294,8 +1295,9 @@ QPushButton:hover {
                             self.ad_overlay.hide()
                         self._show_fullscreen_return_button()
                     else:
-                        proc = subprocess.Popen([firefox_path, target])
+                        proc = subprocess.Popen([firefox_path, "-kiosk", target])
                     self._store_game_pid(proc.pid, title)
+                    self._game_is_browser = True
                     if not is_full_vertical:
                         QTimer.singleShot(
                             1500,
@@ -1353,8 +1355,8 @@ QPushButton:hover {
             else:
                 # Use --kiosk so Chrome has zero UI chrome and all keyboard
                 # shortcuts (Ctrl+W, Ctrl+T, etc.) are disabled.
-                # The reparenting in _raise_overlays_over_game will break
-                # kiosk fullscreen and reposition into the bottom 40%.
+                # Do NOT reparent browser games — that breaks kiosk mode.
+                # Instead overlay ads as TOPMOST on top of the kiosk window.
                 proc = subprocess.Popen([
                     chrome_path,
                     "--kiosk",
@@ -1363,6 +1365,7 @@ QPushButton:hover {
                 ])
                 self._store_game_pid(proc.pid, title)
                 self._game_exe_name = "chrome.exe"
+                self._game_is_browser = True
                 QTimer.singleShot(
                     3000,
                     lambda p=proc.pid: self._constrain_landscape_window(p)
@@ -1466,15 +1469,18 @@ QPushButton:hover {
             self._show_landscape_return_button()
 
     def _raise_overlays_over_game(self, screen_w, ad_height):
-        """Reparent game window as child of a Qt container, then overlay ads.
+        """Position game in bottom 40% and overlay ads on top.
 
-        D3D exclusive fullscreen cannot be maintained by a child window.
-        By reparenting the game into our widget hierarchy, D3D is forced
-        to fall back to windowed mode, allowing us to position and overlay.
+        Two strategies depending on game type:
+        - EXE (D3D) games: Reparent as child of Qt window to break exclusive
+          fullscreen, then use Qt ad overlay on top.
+        - Browser games: Leave kiosk fullscreen intact (preserves shortcut
+          blocking & native input), overlay ads as a TOPMOST window.
         """
         game_hwnd = getattr(self, '_game_hwnd', None)
         screen_w2, screen_h = self._screen_size()
         game_height = screen_h - ad_height
+        is_browser = getattr(self, '_game_is_browser', False)
 
         # Store the game window's actual PID for kill later
         if game_hwnd:
@@ -1485,77 +1491,102 @@ QPushButton:hover {
             except Exception:
                 pass
 
-        # Step 1: Reparent the game window into our Qt main window
-        if game_hwnd:
-            try:
-                our_hwnd = int(self.winId())
-                log_debug(f"[VERT] Reparenting game 0x{game_hwnd:08X} into Qt 0x{our_hwnd:08X}")
+        if is_browser:
+            # --- Browser path: no reparenting, TOPMOST ad overlay ---
+            log_debug(f"[VERT] Browser game — using TOPMOST overlay (no reparent)")
 
-                # Set our window as the parent
-                ctypes.windll.user32.SetParent(game_hwnd, our_hwnd)
+            # Hide Qt ad overlay — we'll use a TOPMOST window instead
+            if self.ad_overlay:
+                self.ad_overlay.hide()
 
-                # Change to child window style
-                style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
-                style = style & ~(win32con.WS_POPUP | win32con.WS_CAPTION |
-                                  win32con.WS_THICKFRAME | win32con.WS_SYSMENU |
-                                  win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX)
-                style = style | win32con.WS_CHILD | win32con.WS_VISIBLE
-                win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, style)
+            # Create a TOPMOST ad overlay window covering the top 60%
+            topmost_ad = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+            topmost_ad.setGeometry(0, 0, screen_w, ad_height)
+            topmost_ad.setAutoFillBackground(True)
 
-                # Remove extended style bits
-                ex_style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_EXSTYLE)
-                ex_style &= ~(win32con.WS_EX_TOPMOST | win32con.WS_EX_DLGMODALFRAME)
-                win32gui.SetWindowLong(game_hwnd, win32con.GWL_EXSTYLE, ex_style)
+            # Re-create the ad loop inside the TOPMOST window
+            ad_widget = AdLoopWidget(topmost_ad)
+            ad_widget.setGeometry(0, 0, screen_w, ad_height)
+            ad_widget.show()
+            ad_widget.resume()
 
-                # Position game in bottom 40% of our window
-                win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
+            topmost_ad.show()
+            self._topmost_ad = topmost_ad
+            self._topmost_ad_widget = ad_widget
+            self._make_overlay_topmost(topmost_ad)
 
-                # Give focus to the game so it receives mouse/keyboard input
+            # Hide loading overlay
+            if hasattr(self, '_loading_overlay'):
+                self._loading_overlay.hide_loading()
+
+            # Show return button as TOPMOST
+            self._show_landscape_return_button_topmost(screen_w, ad_height)
+
+        else:
+            # --- EXE path: reparent to break D3D exclusive fullscreen ---
+            if game_hwnd:
                 try:
-                    win32gui.SetForegroundWindow(game_hwnd)
-                    win32gui.SetFocus(game_hwnd)
-                except Exception:
-                    pass
+                    our_hwnd = int(self.winId())
+                    log_debug(f"[VERT] Reparenting game 0x{game_hwnd:08X} into Qt 0x{our_hwnd:08X}")
 
-                rect = win32gui.GetWindowRect(game_hwnd)
-                log_debug(f"[VERT] Game reparented, rect={rect} "
-                          f"(target child: 0,{ad_height},{screen_w},{ad_height + game_height})")
-            except Exception as e:
-                log_debug(f"[VERT] Reparent failed: {e}")
+                    ctypes.windll.user32.SetParent(game_hwnd, our_hwnd)
 
-        # Step 2: Show the in-app ad overlay (it's now above the game in Z-order)
-        if self.ad_overlay:
-            self.ad_overlay.show()
-            self.ad_overlay.raise_()
-            self.ad_overlay.resume()
+                    style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
+                    style = style & ~(win32con.WS_POPUP | win32con.WS_CAPTION |
+                                      win32con.WS_THICKFRAME | win32con.WS_SYSMENU |
+                                      win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX)
+                    style = style | win32con.WS_CHILD | win32con.WS_VISIBLE
+                    win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, style)
 
-        # Clean up any previous topmost windows (no longer needed with reparenting)
-        for attr in ('_topmost_ad', '_topmost_return_btn'):
-            w = getattr(self, attr, None)
-            if w:
-                try:
-                    w.hide()
-                    w.deleteLater()
-                except Exception:
-                    pass
-                setattr(self, attr, None)
+                    ex_style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_EXSTYLE)
+                    ex_style &= ~(win32con.WS_EX_TOPMOST | win32con.WS_EX_DLGMODALFRAME)
+                    win32gui.SetWindowLong(game_hwnd, win32con.GWL_EXSTYLE, ex_style)
 
-        # Hide loading overlay
-        if hasattr(self, '_loading_overlay'):
-            self._loading_overlay.hide_loading()
+                    win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
 
-        # Show return button as a separate TOPMOST window (child widgets can't
-        # render above Win32 child windows like the reparented game)
-        screen_w2, _ = self._screen_size()
-        self._show_landscape_return_button_topmost(screen_w2, ad_height)
+                    try:
+                        win32gui.SetForegroundWindow(game_hwnd)
+                        win32gui.SetFocus(game_hwnd)
+                    except Exception:
+                        pass
 
-        # Keep re-positioning the game for a few seconds (it may fight back)
-        self._reparent_count = 0
-        self._reparent_params = (game_hwnd, ad_height, screen_w, game_height)
-        self._reparent_timer = QTimer(self)
-        self._reparent_timer.setInterval(500)
-        self._reparent_timer.timeout.connect(self._reassert_reparent)
-        self._reparent_timer.start()
+                    rect = win32gui.GetWindowRect(game_hwnd)
+                    log_debug(f"[VERT] Game reparented, rect={rect} "
+                              f"(target child: 0,{ad_height},{screen_w},{ad_height + game_height})")
+                except Exception as e:
+                    log_debug(f"[VERT] Reparent failed: {e}")
+
+            # Show the in-app ad overlay (above the reparented child in Z-order)
+            if self.ad_overlay:
+                self.ad_overlay.show()
+                self.ad_overlay.raise_()
+                self.ad_overlay.resume()
+
+            # Clean up any previous topmost windows
+            for attr in ('_topmost_ad', '_topmost_return_btn'):
+                w = getattr(self, attr, None)
+                if w:
+                    try:
+                        w.hide()
+                        w.deleteLater()
+                    except Exception:
+                        pass
+                    setattr(self, attr, None)
+
+            # Hide loading overlay
+            if hasattr(self, '_loading_overlay'):
+                self._loading_overlay.hide_loading()
+
+            # Show return button as TOPMOST window
+            self._show_landscape_return_button_topmost(screen_w, ad_height)
+
+            # Keep re-positioning the game for a few seconds (it may fight back)
+            self._reparent_count = 0
+            self._reparent_params = (game_hwnd, ad_height, screen_w, game_height)
+            self._reparent_timer = QTimer(self)
+            self._reparent_timer.setInterval(500)
+            self._reparent_timer.timeout.connect(self._reassert_reparent)
+            self._reparent_timer.start()
 
     def _reassert_reparent(self):
         """Keep repositioning the reparented game window."""
@@ -1732,9 +1763,9 @@ QPushButton:hover {
                 pass
         self._game_hwnd = None
 
-        # Remove return buttons immediately
+        # Remove return buttons and TOPMOST overlays immediately
         for attr in ("_vertical_return_btn", "_landscape_return_btn",
-                      "_topmost_return_btn", "_topmost_ad"):
+                      "_topmost_return_btn", "_topmost_ad", "_topmost_ad_widget"):
             try:
                 w = getattr(self, attr, None)
                 if w:
@@ -1746,6 +1777,7 @@ QPushButton:hover {
 
         # Kill game processes immediately (so game doesn't re-appear)
         self._kill_game_processes()
+        self._game_is_browser = False
 
         # Show "Returning To Menu..." overlay (game is gone, overlay is visible)
         if hasattr(self, '_loading_overlay'):
