@@ -1352,10 +1352,13 @@ QPushButton:hover {
             "--no-default-browser-check",
             "--disable-infobars",
             "--disable-session-crashed-bubble",
-            "--disable-features=DesktopPWAs,WebAppInstall",
+            "--disable-features=DesktopPWAs,WebAppInstall,WebAppInstallation,"
+            "PwaInstall,PwaInstallIcon,WebAppIdentityProxy",
+            "--disable-pwa-install",
             "--disable-save-password-bubble",
             "--disable-sync",
             "--disable-notifications",
+            "--disable-extensions",
         ]
 
         try:
@@ -1384,7 +1387,6 @@ QPushButton:hover {
                     chrome_path,
                     f"--app={target}",
                     *common_flags,
-                    f"--load-extension={nofs_ext}",
                     f"--window-size={screen_w},{game_h}",
                     f"--window-position=0,{ad_h}",
                 ])
@@ -1739,22 +1741,13 @@ QPushButton:hover {
                 ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
             ]
 
-        # Keys to block unconditionally (no modifier needed)
-        VK_F11 = 0x7A
-        VK_ESCAPE = 0x1B
-
         def hook_proc(nCode, wParam, lParam):
             if nCode == HC_ACTION and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
                 kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-                # Block F11 (fullscreen toggle) and Escape (exit fullscreen)
-                if kb.vkCode in (VK_F11, VK_ESCAPE):
-                    log_debug(f"[VERT] Blocked key 0x{kb.vkCode:02X}")
-                    return 1
-                # Block Ctrl+<key> Chrome shortcuts
+                # Only block Ctrl+<key> Chrome shortcuts
                 ctrl_down = ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000
                 if ctrl_down and kb.vkCode in BLOCKED_VKEYS:
-                    log_debug(f"[VERT] Blocked Ctrl+{chr(kb.vkCode)}")
-                    return 1
+                    return 1  # block
             return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
 
         self._hook_proc_ref = HOOKPROC(hook_proc)  # prevent GC
