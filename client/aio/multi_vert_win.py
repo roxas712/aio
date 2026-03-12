@@ -680,6 +680,22 @@ class VerticalMultiWindow(MainWindow):
         # Replace carousel with vertical-sized version
         self._replace_carousel_for_vertical()
 
+        # Compact the main menu layout for the 40% game area.
+        # MainMenu's QVBoxLayout has: stretch(3), carousel, start_btn, stretch(1)
+        # Remove the heavy top stretch and tighten margins so content fills the area.
+        mm_layout = self.main_menu.layout()
+        if mm_layout:
+            # Remove all existing stretch items (they're spacers at index 0 and end)
+            for i in range(mm_layout.count() - 1, -1, -1):
+                item = mm_layout.itemAt(i)
+                if item and item.spacerItem():
+                    mm_layout.removeItem(item)
+            # Add small equal stretches to center content vertically
+            mm_layout.insertStretch(0, 1)
+            mm_layout.addStretch(1)
+            mm_layout.setContentsMargins(20, 10, 20, 10)
+            mm_layout.setSpacing(15)
+
         # Shrink "Get Started" button for vertical
         if hasattr(self.main_menu, 'start_btn'):
             self.main_menu.start_btn.setFixedSize(260, 55)
@@ -768,11 +784,11 @@ QPushButton:hover {
             games=self.games,
             on_select=self.main_menu._game_selected,
             parent=self.main_menu,
-            center_size=QSize(280, 400),
-            side_size=QSize(230, 340),
-            container_size=QSize(1000, 480),
+            center_size=QSize(220, 310),
+            side_size=QSize(180, 260),
+            container_size=QSize(1000, 380),
             num_visible=5,
-            gap=-40,
+            gap=-30,
         )
         # Remove internal padding so container fills the carousel widget width
         new_carousel.layout().setContentsMargins(0, 0, 0, 0)
