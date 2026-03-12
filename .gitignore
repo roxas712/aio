@@ -19,3 +19,4 @@ build/
 
 # Secrets (deployed outside repo)
 github_token.txt
+client/aio/vids/AIO_upper-loop.mov

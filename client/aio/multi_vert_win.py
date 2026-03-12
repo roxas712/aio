@@ -195,12 +195,16 @@ class AdLoopWidget(QWidget):
         if has_cv2:
             for ext in ("*.mp4", "*.mov", "*.avi", "*.mkv"):
                 media.extend(folder_path.glob(ext))
+        # If both .mp4 and .mov exist for the same name, drop the .mp4
+        mov_stems = {m.stem for m in media if m.suffix == '.mov'}
+        media = [m for m in media if not (m.suffix == '.mp4' and m.stem in mov_stems)]
         media = list(sorted(media))
 
         if media:
             self._media_files = media
             self._current_idx = 0
-            log_debug(f"[AD] {len(media)} ad(s) found ({sum(1 for m in media if m.suffix == '.mp4')} video)")
+            vid_exts = {'.mp4', '.mov', '.avi', '.mkv'}
+            log_debug(f"[AD] {len(media)} ad(s) found ({sum(1 for m in media if m.suffix in vid_exts)} video): {[m.name for m in media]}")
             # Defer playback start so fullscreen geometry settles first
             QTimer.singleShot(1000, self._play_current)
         else:
@@ -671,7 +675,7 @@ class VerticalMultiWindow(MainWindow):
 
         self.ad_overlay.load_ads(AIO_ROOT / "kiosk" / "vids")
 
-        log_debug(f"[VERT] Window size: {self.width()}x{self.height()}, margin_top={ad_height}")
+        log_debug(f"[VERT] Window size: {self.width()}x{self.height()}, margin_top={margin_top}")
 
         # Volume control button (upper-right of ad area)
         self._volume_btn = VolumeButton(

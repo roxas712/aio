@@ -104,7 +104,9 @@ if (Test-Path $imgSrc) {
 $vidsSrc = "$kioskSrc\vids"
 $vidsDst = "$kioskDst\vids"
 if (Test-Path $vidsSrc) {
-    if (-not (Test-Path $vidsDst)) {
+    if (Test-Path $vidsDst) {
+        Remove-Item "$vidsDst\*" -Recurse -Force
+    } else {
         New-Item -ItemType Directory -Path $vidsDst -Force | Out-Null
     }
     Get-ChildItem $vidsSrc -Exclude ".DS_Store" | Copy-Item -Destination $vidsDst -Recurse -Force
