@@ -63,6 +63,7 @@ from win_common import (
 
 # --- Game PID file for vertical mode ---
 GAME_PID_FILE = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "config" / "game_pid.txt"
+CHROME_PROFILE_DIR = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "chrome_profile"
 
 # Ad/game split ratio
 AD_RATIO = 0.60
@@ -1314,13 +1315,30 @@ QPushButton:hover {
             return
 
         try:
+            CHROME_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        # Common flags for a clean, chromeless browser session
+        common_flags = [
+            f"--user-data-dir={str(CHROME_PROFILE_DIR)}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-infobars",
+            "--disable-session-crashed-bubble",
+            "--disable-features=DesktopPWAs,WebAppInstall",
+            "--disable-extensions",
+            "--disable-save-password-bubble",
+            "--disable-sync",
+            "--disable-notifications",
+        ]
+
+        try:
             if is_full_vertical:
                 proc = subprocess.Popen([
                     chrome_path,
                     "--kiosk",
-                    "--no-first-run",
-                    "--disable-infobars",
-                    "--disable-session-crashed-bubble",
+                    *common_flags,
                     target,
                 ])
                 if self.ad_overlay:
@@ -1330,18 +1348,14 @@ QPushButton:hover {
             else:
                 proc = subprocess.Popen([
                     chrome_path,
-                    "--new-window",
-                    "--start-minimized",
-                    "--no-first-run",
-                    "--disable-infobars",
-                    "--disable-session-crashed-bubble",
-                    "--disable-features=DesktopPWAs,WebAppInstall",
-                    "--disable-extensions",
-                    target,
+                    f"--app={target}",
+                    *common_flags,
+                    "--window-size=1080,768",
+                    "--window-position=0,1152",
                 ])
                 self._store_game_pid(proc.pid, title)
                 QTimer.singleShot(
-                    1500,
+                    2000,
                     lambda p=proc.pid: self._constrain_landscape_window(p)
                 )
         except Exception:
