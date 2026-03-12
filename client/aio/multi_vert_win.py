@@ -78,10 +78,12 @@ GAME_RATIO = 0.40
 class NeonDivider(QWidget):
     """Glowing cyan neon line used as a visual separator."""
 
+    TOTAL_H = 14  # total widget height (glow region)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
 
     def paintEvent(self, _event):
         p = QPainter(self)
@@ -89,15 +91,18 @@ class NeonDivider(QWidget):
         w, h = self.width(), self.height()
         mid_y = h / 2.0
 
-        # Outer glow (wider, semi-transparent)
-        glow = QColor(0, 200, 255, 60)
-        p.setPen(Qt.NoPen)
-        p.setBrush(glow)
-        p.drawRect(0, 0, w, h)
+        # Black background to cut cleanly between ad and game
+        p.fillRect(0, 0, w, h, QColor(0, 0, 0))
 
-        # Inner bright core line (1-2 px)
-        core = QColor(0, 220, 255, 220)
-        p.setPen(QPen(core, 2))
+        # Soft outer glow layers
+        for i, alpha in enumerate([30, 50, 70]):
+            inset = (3 - i)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0, 200, 255, alpha))
+            p.drawRect(0, int(mid_y) - inset, w, inset * 2)
+
+        # Bright core line
+        p.setPen(QPen(QColor(0, 240, 255, 255), 2))
         p.drawLine(0, int(mid_y), w, int(mid_y))
         p.end()
 
@@ -873,7 +878,9 @@ class VerticalMultiWindow(MainWindow):
 
         # Glowing neon divider between ad area and game area
         self._neon_divider = NeonDivider(self._multi_root)
-        self._neon_divider.setGeometry(0, ad_phys - 2, _init_w, 5)
+        divider_h = NeonDivider.TOTAL_H
+        self._neon_divider.setGeometry(0, ad_phys - divider_h // 2, _init_w, divider_h)
+        self._neon_divider.show()
         self._neon_divider.raise_()
 
         log_debug(f"[VERT] Window size: {self.width()}x{self.height()}, ad_phys={ad_phys}")
