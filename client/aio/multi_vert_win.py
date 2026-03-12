@@ -1318,11 +1318,38 @@ QPushButton:hover {
                 else:
                     self._set_firefox_fullscreen_policy(True)
 
-                # Create a clean Firefox profile dir (no homepage → no extra tab)
+                # Create a clean Firefox profile with prefs that suppress
+                # session restore and extra tabs (force single-window launch).
                 try:
                     FIREFOX_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+                    user_js = FIREFOX_PROFILE_DIR / "user.js"
+                    user_js.write_text(
+                        '// AIO – suppress session restore & extra tabs\n'
+                        'user_pref("browser.sessionstore.resume_from_crash", false);\n'
+                        'user_pref("browser.startup.homepage_override.mstone", "ignore");\n'
+                        'user_pref("browser.startup.page", 0);\n'
+                        'user_pref("browser.startup.homepage", "about:blank");\n'
+                        'user_pref("browser.shell.checkDefaultBrowser", false);\n'
+                        'user_pref("datareporting.policy.dataSubmissionEnabled", false);\n'
+                        'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);\n'
+                        'user_pref("browser.rights.3.shown", true);\n'
+                        'user_pref("browser.startup.firstrunSkipsHomepage", true);\n',
+                        encoding="utf-8",
+                    )
                 except Exception:
                     pass
+
+                # Nuke stale session-restore data so Firefox won't reopen
+                # previously-crashed tabs alongside our target URL.
+                for sf in ("sessionstore.jsonlz4", "sessionstore-backups"):
+                    sp = FIREFOX_PROFILE_DIR / sf
+                    try:
+                        if sp.is_file():
+                            sp.unlink()
+                        elif sp.is_dir():
+                            import shutil; shutil.rmtree(sp, ignore_errors=True)
+                    except Exception:
+                        pass
 
                 try:
                     if is_full_vertical:
