@@ -186,7 +186,7 @@ DEFAULT_GAMES: List[Dict[str, Any]] = [
     {
         "title": "Fortune 2 Go",
         "type": "url",
-        "target": "",
+        "target": "https://www.fortune2go20.com/",
         "img": str(KIOSK_DIR / "img" / "fortune2go.png"),
         "orientation": "vertical",
     },
