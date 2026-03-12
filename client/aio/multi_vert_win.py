@@ -1732,8 +1732,10 @@ QPushButton:hover {
         # Only block the 3 most dangerous Chrome shortcuts
         BLOCKED_CTRL = {0x57, 0x54, 0x4E}  # W, T, N
 
+        # Use correct pointer-sized return type (LRESULT) for 64-bit compat
+        LRESULT = ctypes.c_ssize_t
         HOOKPROC = ctypes.CFUNCTYPE(
-            ctypes.c_long, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+            LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
         )
 
         class KBDLLHOOKSTRUCT(ctypes.Structure):
@@ -1746,14 +1748,22 @@ QPushButton:hover {
             ]
 
         user32 = ctypes.windll.user32
+        user32.CallNextHookEx.restype = LRESULT
+        user32.CallNextHookEx.argtypes = [
+            wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+        ]
+
+        WM_KEYDOWN = 0x0100
+        WM_SYSKEYDOWN = 0x0104
+        VK_CONTROL = 0x11
 
         def hook_proc(nCode, wParam, lParam):
-            if nCode >= 0:
+            if nCode >= 0 and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
                 kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
                 if kb.vkCode in BLOCKED_CTRL:
-                    # Only block if Ctrl is actually held right now
-                    if user32.GetKeyState(0x11) & 0x8000:
-                        return 1
+                    # Use GetAsyncKeyState for physical key state
+                    if user32.GetAsyncKeyState(VK_CONTROL) & 0x8000:
+                        return LRESULT(1)
             return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
         self._hook_proc_ref = HOOKPROC(hook_proc)  # prevent GC
