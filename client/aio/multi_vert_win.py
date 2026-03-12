@@ -183,31 +183,17 @@ class AdLoopWidget(QWidget):
             return False
 
     def load_ads(self, folder_path: Path):
+        """Scan folder for videos and images to use as ad rotation."""
         folder_path.mkdir(parents=True, exist_ok=True)
 
         has_cv2 = self._try_import_cv2()
 
-        VIDEO_EXTS = ("*.mp4", "*.mov", "*.avi", "*.mkv")
-
-        # Seed ads folder with default video if empty
-        if has_cv2 and not any(folder_path.glob(e) for e in VIDEO_EXTS):
-            for name in ("AIO_upper-loop.mov", "AIO_upper-loop.mp4"):
-                default_vid = AIO_ROOT / "kiosk" / "vids" / name
-                if default_vid.exists():
-                    try:
-                        import shutil
-                        shutil.copy2(str(default_vid), str(folder_path / default_vid.name))
-                        log_debug(f"[AD] Copied default ad loop: {name}")
-                    except Exception as e:
-                        log_debug(f"[AD] Failed to copy default ad: {e}")
-                    break
-
-        # Collect media files
+        # Collect all supported media files
         media = []
         for ext in ("*.jpg", "*.jpeg", "*.png", "*.bmp"):
             media.extend(folder_path.glob(ext))
         if has_cv2:
-            for ext in VIDEO_EXTS:
+            for ext in ("*.mp4", "*.mov", "*.avi", "*.mkv"):
                 media.extend(folder_path.glob(ext))
         media = list(sorted(media))
 
@@ -679,8 +665,7 @@ class VerticalMultiWindow(MainWindow):
         self.ad_overlay.show()
         self.ad_overlay.raise_()
 
-        ads_folder = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "ads"
-        self.ad_overlay.load_ads(ads_folder)
+        self.ad_overlay.load_ads(AIO_ROOT / "kiosk" / "vids")
 
         log_debug(f"[VERT] Window size: {self.width()}x{self.height()}, margin_top={ad_height}")
 
