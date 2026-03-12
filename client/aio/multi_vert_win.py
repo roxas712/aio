@@ -1107,9 +1107,11 @@ QPushButton:hover {
         except Exception:
             pass
 
-        # Hide the game selection UI so it doesn't show behind the game
+        # Hide the entire game selection UI so nothing shows behind the game
         if hasattr(self, 'stack'):
             self.stack.hide()
+        if hasattr(self, 'bg_label'):
+            self.bg_label.hide()
 
         # Show loading overlay
         if hasattr(self, '_loading_overlay'):
@@ -1660,9 +1662,18 @@ QPushButton:hover {
             except Exception:
                 pass
 
-        # Show "Returning To Menu..." overlay
+        # Show "Returning To Menu..." overlay (raise above reparented game)
         if hasattr(self, '_loading_overlay'):
             self._loading_overlay.show_loading("Returning To Menu...")
+            try:
+                overlay_hwnd = int(self._loading_overlay.winId())
+                win32gui.SetWindowPos(
+                    overlay_hwnd, win32con.HWND_TOP,
+                    0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+                )
+            except Exception:
+                pass
 
         # Do the actual cleanup after a short delay so the overlay is visible
         QTimer.singleShot(200, self._finish_return_to_main)
@@ -1725,6 +1736,8 @@ QPushButton:hover {
             pass
 
         # Restore multi UI inside bottom region
+        if hasattr(self, 'bg_label'):
+            self.bg_label.show()
         if hasattr(self, 'stack') and hasattr(self, 'main_menu'):
             try:
                 self.stack.show()
