@@ -1339,6 +1339,12 @@ QPushButton:hover {
         # Path to extension that disables the JS Fullscreen API
         nofs_ext = str(Path(__file__).resolve().parent / "chrome_ext_nofs")
 
+        # Set Chrome policy to block JS Fullscreen API for landscape games
+        if not is_full_vertical:
+            self._set_chrome_fullscreen_policy(False)
+        else:
+            self._set_chrome_fullscreen_policy(True)
+
         # Common flags for a clean, chromeless browser session
         common_flags = [
             f"--user-data-dir={str(CHROME_PROFILE_DIR)}",
@@ -1853,6 +1859,31 @@ QPushButton:hover {
             self._winevent_proc_ref = None
 
     # --------------------------------------------------
+    # Chrome Fullscreen Policy
+    # --------------------------------------------------
+
+    @staticmethod
+    def _set_chrome_fullscreen_policy(allowed: bool):
+        """Set Chrome enterprise policy to allow/block JS Fullscreen API.
+
+        Sets HKCU\\SOFTWARE\\Policies\\Google\\Chrome\\FullscreenAllowed.
+        This makes Chrome itself reject requestFullscreen() calls.
+        Kiosk mode (--kiosk) is unaffected — it uses a different mechanism.
+        """
+        import winreg
+        key_path = r"SOFTWARE\Policies\Google\Chrome"
+        try:
+            key = winreg.CreateKeyEx(
+                winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
+            )
+            winreg.SetValueEx(key, "FullscreenAllowed", 0, winreg.REG_DWORD,
+                              1 if allowed else 0)
+            winreg.CloseKey(key)
+            log_debug(f"[VERT] Chrome FullscreenAllowed policy set to {allowed}")
+        except Exception as e:
+            log_debug(f"[VERT] Failed to set Chrome policy: {e}")
+
+    # --------------------------------------------------
     # Return Buttons
     # --------------------------------------------------
 
@@ -1980,6 +2011,7 @@ QPushButton:hover {
             self._reparent_timer.stop()
         self._remove_keyboard_hook()
         self._remove_winevent_hook()
+        self._set_chrome_fullscreen_policy(True)  # restore for kiosk games
 
         # Un-reparent and hide the game window immediately
         game_hwnd = getattr(self, '_game_hwnd', None)
