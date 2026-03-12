@@ -1551,6 +1551,9 @@ QPushButton:hover {
             # Return button as TOPMOST window
             self._show_landscape_return_button_topmost(screen_w, ad_height)
 
+            # Cover Chrome's title bar with a TOPMOST overlay strip
+            self._show_titlebar_cover(screen_w, ad_height)
+
             # Install WinEvent hook for instant fullscreen/resize detection
             self._browser_target_rect = (0, ad_height, screen_w, game_height)
             self._install_winevent_hook(game_hwnd)
@@ -1878,6 +1881,31 @@ QPushButton:hover {
             log_debug(f"[VERT] Failed to set Chrome policy: {e}")
 
     # --------------------------------------------------
+    # Title Bar Cover (hides Chrome's min/max/close)
+    # --------------------------------------------------
+
+    def _show_titlebar_cover(self, screen_w, ad_height):
+        """Place a TOPMOST black strip over Chrome's title bar area."""
+        old = getattr(self, '_titlebar_cover', None)
+        if old:
+            try:
+                old.deleteLater()
+            except Exception:
+                pass
+
+        TITLEBAR_H = 32  # Chrome title bar height in pixels
+
+        cover = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        cover.setAutoFillBackground(True)
+        pal = cover.palette()
+        pal.setColor(cover.backgroundRole(), QColor(0, 0, 0))
+        cover.setPalette(pal)
+        cover.setGeometry(0, ad_height, screen_w, TITLEBAR_H)
+        cover.show()
+        self._titlebar_cover = cover
+        self._make_overlay_topmost(cover)
+
+    # --------------------------------------------------
     # Return Buttons
     # --------------------------------------------------
 
@@ -2018,9 +2046,10 @@ QPushButton:hover {
                 pass
         self._game_hwnd = None
 
-        # Remove return buttons and TOPMOST overlays immediately
+        # Remove return buttons, title bar cover, and TOPMOST overlays
         for attr in ("_vertical_return_btn", "_landscape_return_btn",
-                      "_topmost_return_btn", "_topmost_ad", "_topmost_ad_widget"):
+                      "_topmost_return_btn", "_topmost_ad", "_topmost_ad_widget",
+                      "_titlebar_cover"):
             try:
                 w = getattr(self, attr, None)
                 if w:
