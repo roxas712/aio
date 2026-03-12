@@ -1269,6 +1269,11 @@ QPushButton:hover {
             return
 
         # URL-based platforms
+        if not target:
+            log_debug(f"[VERT] No URL target for {title}, returning to main")
+            self.return_to_main()
+            return
+
         # Classic Online → Firefox
         if title.lower() == "classic online":
             firefox_candidates = [
@@ -1346,16 +1351,20 @@ QPushButton:hover {
                 self._store_game_pid(proc.pid, title)
                 self._show_fullscreen_return_button()
             else:
+                # Use --kiosk so Chrome has zero UI chrome and all keyboard
+                # shortcuts (Ctrl+W, Ctrl+T, etc.) are disabled.
+                # The reparenting in _raise_overlays_over_game will break
+                # kiosk fullscreen and reposition into the bottom 40%.
                 proc = subprocess.Popen([
                     chrome_path,
-                    f"--app={target}",
+                    "--kiosk",
                     *common_flags,
-                    "--window-size=1080,768",
-                    "--window-position=0,1152",
+                    target,
                 ])
                 self._store_game_pid(proc.pid, title)
+                self._game_exe_name = "chrome.exe"
                 QTimer.singleShot(
-                    2000,
+                    3000,
                     lambda p=proc.pid: self._constrain_landscape_window(p)
                 )
         except Exception:
@@ -1501,6 +1510,13 @@ QPushButton:hover {
                 # Position game in bottom 40% of our window
                 win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
 
+                # Give focus to the game so it receives mouse/keyboard input
+                try:
+                    win32gui.SetForegroundWindow(game_hwnd)
+                    win32gui.SetFocus(game_hwnd)
+                except Exception:
+                    pass
+
                 rect = win32gui.GetWindowRect(game_hwnd)
                 log_debug(f"[VERT] Game reparented, rect={rect} "
                           f"(target child: 0,{ad_height},{screen_w},{ad_height + game_height})")
@@ -1630,26 +1646,37 @@ QPushButton:hover {
         self._make_overlay_topmost(btn_win)
 
     def _show_fullscreen_return_button(self):
-        """Show return button for full-vertical games."""
-        if hasattr(self, "_vertical_return_btn"):
-            try:
-                self._vertical_return_btn.deleteLater()
-            except Exception:
-                pass
+        """Show return button for full-vertical games as a TOPMOST window.
 
-        btn = QPushButton("Return", self)
+        Full-vertical games cover the entire screen, so a Qt child widget
+        can't render above them.  Use a separate frameless TOPMOST window.
+        """
+        # Clean up any previous button
+        for attr in ("_vertical_return_btn", "_topmost_return_btn"):
+            old = getattr(self, attr, None)
+            if old:
+                try:
+                    old.deleteLater()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+        btn_win = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        btn_win.setAttribute(Qt.WA_TranslucentBackground)
+        btn_win.setGeometry(0, 0, 500, 100)
+
+        btn = QPushButton("Return", btn_win)
         btn.setFixedSize(160, 70)
+        btn.move(30, 15)
         btn.setStyleSheet(self._return_btn_style())
-        btn.enterEvent = lambda e, b=btn: self._expand_return_btn(b)
-        btn.leaveEvent = lambda e, b=btn: self._collapse_return_btn(b)
-
-        _, screen_h = self._screen_size()
-        ad_height = int(screen_h * AD_RATIO)
-        btn.move(30, ad_height - 70 - 15)
-        btn.raise_()
-        btn.show()
+        btn.enterEvent = lambda e, b=btn, w=btn_win: self._expand_return_btn(b, w)
+        btn.leaveEvent = lambda e, b=btn, w=btn_win: self._collapse_return_btn(b, w)
         btn.clicked.connect(self.return_to_main)
-        self._vertical_return_btn = btn
+
+        btn_win.show()
+        self._topmost_return_btn = btn_win
+        self._vertical_return_btn = btn_win
+        self._make_overlay_topmost(btn_win)
 
     # --------------------------------------------------
     # Vertical Return Override
