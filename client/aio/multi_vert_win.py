@@ -1288,19 +1288,45 @@ QPushButton:hover {
                     break
 
             if firefox_path:
+                # Kill leftover Firefox so flags apply fresh
+                try:
+                    subprocess.run(
+                        ["taskkill", "/IM", "firefox.exe", "/F"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    import time; time.sleep(0.5)
+                except Exception:
+                    pass
+
+                # Set Firefox policy to block JS Fullscreen API for landscape
+                if not is_full_vertical:
+                    self._set_firefox_fullscreen_policy(False)
+                else:
+                    self._set_firefox_fullscreen_policy(True)
+
                 try:
                     if is_full_vertical:
                         proc = subprocess.Popen([firefox_path, "-kiosk", target])
                         if self.ad_overlay:
                             self.ad_overlay.hide()
+                        self._store_game_pid(proc.pid, title)
                         self._show_fullscreen_return_button()
                     else:
-                        proc = subprocess.Popen([firefox_path, "-kiosk", target])
-                    self._store_game_pid(proc.pid, title)
-                    self._game_is_browser = True
-                    if not is_full_vertical:
+                        screen_w, screen_h = self._screen_size()
+                        ad_h = int(screen_h * AD_RATIO)
+                        game_h = screen_h - ad_h
+                        proc = subprocess.Popen([
+                            firefox_path,
+                            "-new-window",
+                            f"-width", str(screen_w),
+                            f"-height", str(game_h),
+                            target,
+                        ])
+                        self._store_game_pid(proc.pid, title)
+                        self._game_exe_name = "firefox.exe"
+                        self._game_is_browser = True
                         QTimer.singleShot(
-                            1500,
+                            3000,
                             lambda p=proc.pid: self._constrain_landscape_window(p)
                         )
                 except Exception:
@@ -1890,6 +1916,26 @@ QPushButton:hover {
         except Exception as e:
             log_debug(f"[VERT] Failed to set Chrome policy: {e}")
 
+    @staticmethod
+    def _set_firefox_fullscreen_policy(allowed: bool):
+        """Set Firefox enterprise policy to allow/block JS Fullscreen API.
+
+        Sets HKCU\\SOFTWARE\\Policies\\Mozilla\\Firefox\\Permissions\\Fullscreen.
+        BlockNewRequests = true prevents requestFullscreen() calls.
+        """
+        import winreg
+        key_path = r"SOFTWARE\Policies\Mozilla\Firefox\Permissions\Fullscreen"
+        try:
+            key = winreg.CreateKeyEx(
+                winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
+            )
+            winreg.SetValueEx(key, "BlockNewRequests", 0, winreg.REG_DWORD,
+                              0 if allowed else 1)
+            winreg.CloseKey(key)
+            log_debug(f"[VERT] Firefox Fullscreen BlockNewRequests set to {not allowed}")
+        except Exception as e:
+            log_debug(f"[VERT] Failed to set Firefox policy: {e}")
+
     # --------------------------------------------------
     # Title Bar Cover (hides Chrome's min/max/close)
     # --------------------------------------------------
@@ -2054,7 +2100,8 @@ QPushButton:hover {
             self._reparent_timer.stop()
         self._remove_keyboard_hook()
         self._remove_winevent_hook()
-        self._set_chrome_fullscreen_policy(True)  # restore for kiosk games
+        self._set_chrome_fullscreen_policy(True)   # restore for kiosk games
+        self._set_firefox_fullscreen_policy(True)  # restore for kiosk games
 
         # Un-reparent and hide the game window immediately
         game_hwnd = getattr(self, '_game_hwnd', None)
