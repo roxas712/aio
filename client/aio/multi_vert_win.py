@@ -446,10 +446,39 @@ class VerticalManagerPage(QWidget):
 
             combo_style = """
                 QComboBox {
-                    font-size: 13px; padding: 4px;
-                    background-color: #333; color: white; border-radius: 4px;
+                    font-size: 14px; padding: 8px 12px;
+                    background-color: rgba(0, 0, 0, 180);
+                    color: #FFD700;
+                    border: 2px solid #FFD700;
+                    border-radius: 8px;
+                    font-weight: bold;
+                }
+                QComboBox:hover {
+                    border-color: #FFEA80;
+                    background-color: rgba(255, 215, 0, 30);
+                }
+                QComboBox::drop-down {
+                    border: none;
+                    width: 30px;
+                }
+                QComboBox::down-arrow {
+                    image: none;
+                    border-left: 5px solid transparent;
+                    border-right: 5px solid transparent;
+                    border-top: 6px solid #FFD700;
+                    margin-right: 8px;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #1a1a2e;
+                    color: #FFD700;
+                    border: 2px solid #FFD700;
+                    border-radius: 4px;
+                    selection-background-color: rgba(255, 215, 0, 80);
+                    selection-color: white;
+                    padding: 4px;
                 }
             """
+            label_style = "color: #FFD700; font-size: 14px; font-weight: bold;"
 
             dropdown_row = QHBoxLayout()
             dropdown_row.setSpacing(20)
@@ -458,11 +487,11 @@ class VerticalManagerPage(QWidget):
             orientation_col = QVBoxLayout()
             orientation_label = QLabel("Orientation", self)
             orientation_label.setAlignment(Qt.AlignCenter)
-            orientation_label.setStyleSheet("color: white; font-size: 13px;")
+            orientation_label.setStyleSheet(label_style)
             orientation_col.addWidget(orientation_label)
 
             self.orientation_combo = QComboBox(self)
-            self.orientation_combo.setFixedWidth(180)
+            self.orientation_combo.setFixedWidth(200)
             self.orientation_combo.setStyleSheet(combo_style)
             for text, mode in [("Landscape", 0), ("Portrait", 1),
                                ("Landscape (Flip)", 2), ("Portrait (Flip)", 3)]:
@@ -478,11 +507,11 @@ class VerticalManagerPage(QWidget):
             resolution_col = QVBoxLayout()
             resolution_label = QLabel("Resolution", self)
             resolution_label.setAlignment(Qt.AlignCenter)
-            resolution_label.setStyleSheet("color: white; font-size: 13px;")
+            resolution_label.setStyleSheet(label_style)
             resolution_col.addWidget(resolution_label)
 
             self.resolution_combo = QComboBox(self)
-            self.resolution_combo.setFixedWidth(180)
+            self.resolution_combo.setFixedWidth(200)
             self.resolution_combo.setStyleSheet(combo_style)
             if current_h > current_w:
                 res_options = [(720, 1280), (1080, 1920), (2160, 3840)]
