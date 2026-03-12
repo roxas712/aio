@@ -739,6 +739,36 @@ QPushButton:hover {
         log_debug(f"[VERT] __init__ complete. games={len(self.games) if self.games else 0}, "
                   f"has_carousel={hasattr(self.main_menu, 'carousel')}")
 
+        # Deferred diagnostic — fires after layout settles
+        def _diag():
+            mm = self.main_menu
+            c = getattr(mm, 'carousel', None)
+            b = getattr(mm, 'start_btn', None)
+            log_debug(f"[DIAG] window={self.width()}x{self.height()}")
+            log_debug(f"[DIAG] stack vis={self.stack.isVisible()} geo={self.stack.geometry()}")
+            log_debug(f"[DIAG] mainmenu vis={mm.isVisible()} geo={mm.geometry()}")
+            if c:
+                log_debug(f"[DIAG] carousel vis={c.isVisible()} geo={c.geometry()} "
+                          f"container={c.card_container.geometry() if hasattr(c, 'card_container') else '?'}")
+                cards = c.card_container.findChildren(QPushButton) if hasattr(c, 'card_container') else []
+                log_debug(f"[DIAG] carousel cards={len(cards)}")
+            if b:
+                log_debug(f"[DIAG] start_btn vis={b.isVisible()} geo={b.geometry()}")
+            # Check layout items
+            ml = mm.layout()
+            if ml:
+                items = []
+                for i in range(ml.count()):
+                    it = ml.itemAt(i)
+                    if it.widget():
+                        w = it.widget()
+                        items.append(f"W:{w.__class__.__name__}({w.geometry()})")
+                    elif it.spacerItem():
+                        sp = it.spacerItem()
+                        items.append(f"S:{sp.sizeHint()}")
+                log_debug(f"[DIAG] mm_layout items={items}")
+        QTimer.singleShot(2000, _diag)
+
     def _apply_new_games(self, new_games: list):
         """Override: rebuild game UI then re-apply vertical-specific adjustments."""
         super()._apply_new_games(new_games)
