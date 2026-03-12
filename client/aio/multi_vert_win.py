@@ -64,6 +64,7 @@ from win_common import (
 # --- Game PID file for vertical mode ---
 GAME_PID_FILE = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "config" / "game_pid.txt"
 CHROME_PROFILE_DIR = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "chrome_profile"
+FIREFOX_PROFILE_DIR = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "firefox_profile"
 
 # Ad/game split ratio
 AD_RATIO = 0.60
@@ -1317,6 +1318,12 @@ QPushButton:hover {
                 else:
                     self._set_firefox_fullscreen_policy(True)
 
+                # Create a clean Firefox profile dir (no homepage → no extra tab)
+                try:
+                    FIREFOX_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+
                 try:
                     if is_full_vertical:
                         proc = subprocess.Popen([firefox_path, "-kiosk", target])
@@ -1325,12 +1332,18 @@ QPushButton:hover {
                         self._store_game_pid(proc.pid, title)
                         self._show_fullscreen_return_button()
                     else:
-                        # Use -kiosk to hide all browser UI (address bar,
-                        # tabs, nav buttons).  The constrain step will resize
-                        # the kiosk window into the bottom 40%.
+                        screen_w, screen_h = self._screen_size()
+                        ad_h = int(screen_h * AD_RATIO)
+                        game_h = screen_h - ad_h
+                        # Use a clean profile (no homepage/extra tabs) and
+                        # -new-window.  The title bar cover + frame stripping
+                        # hide the Firefox UI; kiosk mode fights resizing.
                         proc = subprocess.Popen([
                             firefox_path,
-                            "-kiosk",
+                            "-profile", str(FIREFOX_PROFILE_DIR),
+                            "-new-window",
+                            f"-width", str(screen_w),
+                            f"-height", str(game_h),
                             target,
                         ])
                         self._store_game_pid(proc.pid, title)
@@ -1951,8 +1964,8 @@ QPushButton:hover {
     # Title Bar Cover (hides Chrome's min/max/close)
     # --------------------------------------------------
 
-    def _show_titlebar_cover(self, screen_w, ad_height):
-        """Place a TOPMOST click-through black strip over Chrome's title bar."""
+    def _show_titlebar_cover(self, screen_w, ad_height, cover_h=None):
+        """Place a TOPMOST click-through black strip over the browser title bar."""
         old = getattr(self, '_titlebar_cover', None)
         if old:
             try:
@@ -1960,7 +1973,12 @@ QPushButton:hover {
             except Exception:
                 pass
 
-        TITLEBAR_H = 32  # Chrome title bar height in pixels
+        # Firefox shows full nav bar (~75px), Chrome --app shows only ~32px
+        exe = getattr(self, '_game_exe_name', '') or ''
+        if cover_h is None:
+            TITLEBAR_H = 75 if 'firefox' in exe.lower() else 32
+        else:
+            TITLEBAR_H = cover_h
 
         cover = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         cover.setAttribute(Qt.WA_TransparentForMouseEvents, True)
