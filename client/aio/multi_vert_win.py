@@ -1279,39 +1279,37 @@ QPushButton:hover {
     # --------------------------------------------------
 
     def _constrain_window(self, hwnd, y_offset, screen_w, game_height):
-        """Remove borders and position a window into the bottom game region."""
+        """Break out of fullscreen and position a window into the bottom game region."""
         title = win32gui.GetWindowText(hwnd)
 
-        # Log current position before moving
+        # Log current state
         try:
             rect = win32gui.GetWindowRect(hwnd)
-            log_debug(f"[VERT] Window '{title}' BEFORE: rect={rect}")
+            style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+            ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+            log_debug(f"[VERT] '{title}' BEFORE: rect={rect} style=0x{style:08X} ex=0x{ex_style:08X}")
         except Exception:
             pass
 
-        # Restore if minimized
-        try:
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        except Exception:
-            pass
-
-        # Remove window borders
+        # Step 1: Strip fullscreen style — remove WS_POPUP (fullscreen) and all frame bits
         try:
             style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
             style &= ~(
-                win32con.WS_CAPTION | win32con.WS_THICKFRAME
+                win32con.WS_POPUP | win32con.WS_CAPTION | win32con.WS_THICKFRAME
                 | win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX
-                | win32con.WS_SYSMENU
+                | win32con.WS_SYSMENU | win32con.WS_OVERLAPPEDWINDOW
             )
+            style |= win32con.WS_VISIBLE | win32con.WS_CLIPSIBLINGS
             win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
         except Exception:
             pass
 
-        # Remove extended style borders
+        # Step 2: Remove TOPMOST and other extended bits
         try:
             ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
             ex_style &= ~(
-                win32con.WS_EX_DLGMODALFRAME
+                win32con.WS_EX_TOPMOST
+                | win32con.WS_EX_DLGMODALFRAME
                 | win32con.WS_EX_CLIENTEDGE
                 | win32con.WS_EX_STATICEDGE
             )
@@ -1319,17 +1317,34 @@ QPushButton:hover {
         except Exception:
             pass
 
-        # Position into bottom game region
-        win32gui.SetWindowPos(
-            hwnd, None,
-            0, y_offset, screen_w, game_height,
-            win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED | win32con.SWP_SHOWWINDOW
-        )
+        # Step 3: Force out of maximized/fullscreen state
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_NORMAL)
+        except Exception:
+            pass
 
-        # Verify position after moving
+        # Step 4: Position using HWND_NOTOPMOST to strip topmost flag
+        HWND_NOTOPMOST = -2
+        try:
+            win32gui.SetWindowPos(
+                hwnd, HWND_NOTOPMOST,
+                0, y_offset, screen_w, game_height,
+                win32con.SWP_FRAMECHANGED | win32con.SWP_SHOWWINDOW
+            )
+        except Exception:
+            pass
+
+        # Step 5: Fallback — MoveWindow which some apps respect better
+        try:
+            win32gui.MoveWindow(hwnd, 0, y_offset, screen_w, game_height, True)
+        except Exception:
+            pass
+
+        # Verify
         try:
             rect = win32gui.GetWindowRect(hwnd)
-            log_debug(f"[VERT] Window '{title}' AFTER: rect={rect} (target: 0,{y_offset},{screen_w},{y_offset + game_height})")
+            style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+            log_debug(f"[VERT] '{title}' AFTER: rect={rect} style=0x{style:08X} (target: 0,{y_offset},{screen_w},{y_offset + game_height})")
         except Exception:
             pass
 
