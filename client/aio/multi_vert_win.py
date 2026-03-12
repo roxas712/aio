@@ -1321,28 +1321,34 @@ QPushButton:hover {
                 # Classic Online always uses this URL regardless of games.json
                 target = "https://cgweb.app/home/"
 
-                # Create a clean Firefox profile and write BOTH user.js and
-                # prefs.js to guarantee session-restore is disabled.
+                # Create a clean Firefox profile.  Only write user.js (Firefox
+                # reads it on every launch as overrides; prefs.js is Firefox's
+                # own saved state — overwriting it resets first-run flags).
                 try:
                     FIREFOX_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-                    _ff_prefs = (
+                    (FIREFOX_PROFILE_DIR / "user.js").write_text(
+                        '// AIO kiosk overrides – rewritten each launch\n'
                         'user_pref("browser.sessionstore.resume_from_crash", false);\n'
                         'user_pref("browser.sessionstore.resume_session_once", false);\n'
                         'user_pref("browser.startup.homepage_override.mstone", "ignore");\n'
                         'user_pref("browser.startup.page", 0);\n'
                         'user_pref("browser.startup.homepage", "about:blank");\n'
                         'user_pref("browser.shell.checkDefaultBrowser", false);\n'
+                        'user_pref("browser.tabs.warnOnClose", false);\n'
+                        # Suppress first-run / welcome page
+                        'user_pref("browser.aboutwelcome.enabled", false);\n'
+                        'user_pref("trailhead.firstrun.didSeeAboutWelcome", true);\n'
+                        'user_pref("browser.startup.firstrunSkipsHomepage", true);\n'
+                        'user_pref("startup.homepage_welcome_url", "");\n'
+                        'user_pref("startup.homepage_welcome_url.additional", "");\n'
+                        # Suppress telemetry / rights / data-reporting prompts
                         'user_pref("datareporting.policy.dataSubmissionEnabled", false);\n'
+                        'user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);\n'
                         'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);\n'
                         'user_pref("browser.rights.3.shown", true);\n'
-                        'user_pref("browser.startup.firstrunSkipsHomepage", true);\n'
-                        'user_pref("browser.tabs.warnOnClose", false);\n'
-                    )
-                    (FIREFOX_PROFILE_DIR / "user.js").write_text(
-                        _ff_prefs, encoding="utf-8"
-                    )
-                    (FIREFOX_PROFILE_DIR / "prefs.js").write_text(
-                        _ff_prefs, encoding="utf-8"
+                        'user_pref("browser.disableResetPrompt", true);\n'
+                        'user_pref("browser.messaging-system.whatsNewPanel.enabled", false);\n',
+                        encoding="utf-8",
                     )
                 except Exception:
                     pass
