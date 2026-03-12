@@ -661,11 +661,11 @@ class VerticalMultiWindow(MainWindow):
         # Ad overlay uses physical screen coordinates
         ad_phys = int(_init_h * AD_RATIO)
 
-        # Layout margin uses the widget's own DPI-scaled coordinate system
-        widget_h = self.height() or _init_h
-        margin_top = int(widget_h * AD_RATIO)
+        # Do NOT set contentsMargins on central widget — let bg_label and
+        # stack fill the full window.  Game content is pushed down via a
+        # fixed spacer inside MainMenu instead.
         if self._multi_root.layout():
-            self._multi_root.layout().setContentsMargins(0, margin_top, 0, 0)
+            self._multi_root.layout().setContentsMargins(0, 0, 0, 0)
 
         # Create Ad Overlay as child of central widget (covers top 60%)
         self.ad_overlay = AdLoopWidget(self._multi_root)
@@ -675,7 +675,7 @@ class VerticalMultiWindow(MainWindow):
 
         self.ad_overlay.load_ads(AIO_ROOT / "kiosk" / "vids")
 
-        log_debug(f"[VERT] Window size: {self.width()}x{self.height()}, margin_top={margin_top}")
+        log_debug(f"[VERT] Window size: {self.width()}x{self.height()}, ad_phys={ad_phys}")
 
         # Volume control button (upper-right of ad area)
         self._volume_btn = VolumeButton(
@@ -688,20 +688,22 @@ class VerticalMultiWindow(MainWindow):
         # Replace carousel with vertical-sized version
         self._replace_carousel_for_vertical()
 
-        # Compact the main menu layout for the 40% game area.
-        # MainMenu's QVBoxLayout has: stretch(3), carousel, start_btn, stretch(1)
-        # Remove the heavy top stretch and tighten margins so content fills the area.
+        # Push game content into the bottom 40% of the screen.
+        # MainMenu fills the full window.  We replace the top stretch with a
+        # fixed-height spacer equal to the ad area so content sits just below it.
         mm_layout = self.main_menu.layout()
         if mm_layout:
-            # Remove all existing stretch items (they're spacers at index 0 and end)
+            # Remove all existing stretch items
             for i in range(mm_layout.count() - 1, -1, -1):
                 item = mm_layout.itemAt(i)
                 if item and item.spacerItem():
                     mm_layout.removeItem(item)
-            # Add small equal stretches to center content vertically
-            mm_layout.insertStretch(0, 1)
+            # Fixed spacer matching the ad area height
+            from PyQt5.QtWidgets import QSpacerItem
+            self._ad_spacer = QSpacerItem(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
+            mm_layout.insertItem(0, self._ad_spacer)
             mm_layout.addStretch(1)
-            mm_layout.setContentsMargins(20, 10, 20, 10)
+            mm_layout.setContentsMargins(20, 0, 20, 10)
             mm_layout.setSpacing(15)
 
         # Shrink "Get Started" button for vertical
@@ -858,33 +860,21 @@ QPushButton:hover {
         if not self.ad_overlay or not self._multi_root:
             return
 
-        # Ad overlay uses physical screen pixels (for correct rendering)
+        # Ad overlay uses physical screen pixels
         screen_w, screen_h = self._screen_size()
         ad_phys = int(screen_h * AD_RATIO)
         self.ad_overlay.setGeometry(0, 0, screen_w, ad_phys)
         self.ad_overlay.raise_()
 
-        # Layout margin uses the widget's own coordinate system (DPI-scaled).
-        # self.height() may be larger than screen_h due to DPI scaling.
-        widget_h = self.height()
-        if widget_h > 0:
-            margin_top = int(widget_h * AD_RATIO)
-        else:
-            margin_top = ad_phys
-        if self._multi_root.layout():
-            self._multi_root.layout().setContentsMargins(0, margin_top, 0, 0)
+        # Update the fixed spacer in MainMenu to match ad height
+        if hasattr(self, '_ad_spacer'):
+            self._ad_spacer.changeSize(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
+            if self.main_menu.layout():
+                self.main_menu.layout().invalidate()
 
     def _enforce_bottom_layout(self):
-        """Re-apply the top margin that pushes game content to bottom 40%."""
-        if not self._multi_root or not self._multi_root.layout():
-            return
-        widget_h = self.height()
-        if widget_h > 0:
-            margin_top = int(widget_h * AD_RATIO)
-        else:
-            _, sh = self._screen_size()
-            margin_top = int(sh * AD_RATIO)
-        self._multi_root.layout().setContentsMargins(0, margin_top, 0, 0)
+        """Re-apply the ad spacer height in case it drifted."""
+        self._update_ad_geometry()
 
     # --------------------------------------------------
     # Admin Menu Override
