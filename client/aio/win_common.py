@@ -411,6 +411,32 @@ def send_click_to_server(game_title: str) -> None:
 # Status reporting helper
 # ------------------------------
 
+_startup_restart_cleared = False
+
+
+def clear_pending_restart():
+    """Clear any stale restart flag on the server without rebooting.
+
+    Call this once at app startup so a manual reboot doesn't trigger
+    a second reboot from a leftover restart_flag.
+    """
+    global _startup_restart_cleared
+    if _startup_restart_cleared:
+        return
+    _startup_restart_cleared = True
+    try:
+        base = get_server_base_url()
+        cfg = load_client_config()
+        ack_url = f"{base}/client/ack_restart"
+        requests.post(ack_url, json={
+            "uuid": get_client_uuid(),
+            "activation_key": cfg.get("activation_key", ""),
+            "terminal": cfg.get("terminal_name", ""),
+        }, timeout=3)
+    except Exception:
+        pass
+
+
 def send_status_to_server(status: str) -> dict:
     """
     Report runtime status to the server and return server commands.
