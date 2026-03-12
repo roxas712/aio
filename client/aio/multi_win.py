@@ -644,12 +644,10 @@ class BlurImageButton(QWidget):
             )
             scaled = self._pixmap.scaled(
                 target_size,
-                Qt.KeepAspectRatio,
+                Qt.IgnoreAspectRatio,
                 Qt.SmoothTransformation
             )
-            x_offset = int(inner_rect.x() + (inner_rect.width() - scaled.width()) / 2)
-            y_offset = int(inner_rect.y() + (inner_rect.height() - scaled.height()) / 2)
-            painter.drawPixmap(x_offset, y_offset, scaled)
+            painter.drawPixmap(int(inner_rect.x()), int(inner_rect.y()), scaled)
 
         painter.setClipping(False)
 
