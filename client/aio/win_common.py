@@ -71,6 +71,38 @@ def get_registry_machine_id() -> str:
 
 
 # ------------------------------
+# Terminal name sync
+# ------------------------------
+
+def get_terminal_name() -> str:
+    """Read terminal name from activation.json."""
+    try:
+        if ACTIVATION_FILE.exists():
+            with ACTIVATION_FILE.open("r", encoding="utf-8") as f:
+                return json.load(f).get("terminal", "")
+    except Exception:
+        pass
+    return ""
+
+
+def _sync_terminal_name(server_name: str) -> None:
+    """Update activation.json if the server-assigned terminal name changed."""
+    try:
+        data = {}
+        if ACTIVATION_FILE.exists():
+            with ACTIVATION_FILE.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        current = data.get("terminal", "")
+        if current != server_name:
+            data["terminal"] = server_name
+            ACTIVATION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with ACTIVATION_FILE.open("w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+# ------------------------------
 # Version info
 # ------------------------------
 
@@ -461,6 +493,11 @@ def send_status_to_server(status: str) -> dict:
         resp = requests.post(url, json=payload, timeout=3)
         if resp.ok:
             data = resp.json()
+            # Sync terminal_name from server if changed
+            config = data.get("config", {})
+            server_name = config.get("terminal_name")
+            if server_name:
+                _sync_terminal_name(server_name)
             # Handle restart command from server
             commands = data.get("commands", {})
             if commands.get("restart"):

@@ -57,7 +57,7 @@ from multi_win import MainWindow, CarouselWidget, CURRENT_PID_FILE
 from win_common import (
     AIO_ROOT, PROGRAMDATA_ROOT, VERSION_FILE,
     launch_game as win_launch_game,
-    get_local_ip, get_client_uuid, send_status_to_server,
+    get_local_ip, get_client_uuid, get_terminal_name, send_status_to_server,
     clear_pending_restart, force_portrait,
 )
 
@@ -505,6 +505,12 @@ class VerticalManagerPage(QWidget):
         ip_label.setStyleSheet(info_style)
         layout.addWidget(ip_label)
 
+        t_name = get_terminal_name() or "N/A"
+        self._admin_terminal_label = QLabel(f"Terminal: {t_name}", self)
+        self._admin_terminal_label.setAlignment(Qt.AlignCenter)
+        self._admin_terminal_label.setStyleSheet(info_style)
+        layout.addWidget(self._admin_terminal_label)
+
         version = "N/A"
         commit_sha = ""
         try:
@@ -906,6 +912,13 @@ QPushButton:hover {
         self._loading_overlay.setFixedSize(screen_w, game_height)
         self._loading_overlay.move(0, screen_h - game_height)
         self._loading_overlay.hide()
+
+        # Periodic heartbeat — pings the server every 60s and syncs
+        # terminal name / commands.
+        self._heartbeat_timer = QTimer(self)
+        self._heartbeat_timer.setInterval(60_000)
+        self._heartbeat_timer.timeout.connect(self._heartbeat_ping)
+        self._heartbeat_timer.start()
 
         log_debug(f"[VERT] __init__ complete. games={len(self.games) if self.games else 0}, "
                   f"has_carousel={hasattr(self.main_menu, 'carousel')}")
@@ -2219,6 +2232,23 @@ QPushButton:hover {
     def _hide_loading_overlay(self):
         if hasattr(self, '_loading_overlay'):
             self._loading_overlay.hide_loading()
+
+    # -- Periodic heartbeat -----------------------------------------
+    def _heartbeat_ping(self):
+        """Send a status ping and refresh the terminal name label."""
+        try:
+            status = "in_play" if self._game_pid else "menu"
+            send_status_to_server(status)
+        except Exception:
+            pass
+        # Refresh terminal name label in admin panel (if open)
+        try:
+            mp = getattr(self, 'manager_page', None)
+            if mp and hasattr(mp, '_admin_terminal_label'):
+                t_name = get_terminal_name() or "N/A"
+                mp._admin_terminal_label.setText(f"Terminal: {t_name}")
+        except Exception:
+            pass
 
 
 # ------------------------------------------------------
