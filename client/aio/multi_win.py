@@ -1554,6 +1554,9 @@ class MainWindow(QMainWindow):
         self._loading_overlay.hide_loading()
         self.hide()
 
+        # Show floating TOPMOST return button over the game
+        self._show_game_return_button()
+
         # Poll for game exit, then return to menu
         self._game_proc = proc
         self._game_poll_timer = QTimer(self)
@@ -1561,25 +1564,121 @@ class MainWindow(QMainWindow):
         self._game_poll_timer.timeout.connect(self._check_game_exited)
         self._game_poll_timer.start()
 
+    def _show_game_return_button(self):
+        """Show a floating TOPMOST return button over the fullscreen game."""
+        old = getattr(self, '_game_return_win', None)
+        if old:
+            try:
+                old.deleteLater()
+            except Exception:
+                pass
+
+        btn_win = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        btn_win.setAttribute(Qt.WA_TranslucentBackground)
+        btn_win.setGeometry(10, 10, 500, 80)
+
+        btn = QPushButton("Return", btn_win)
+        btn.setFixedSize(160, 60)
+        btn.move(10, 10)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+                border-radius: 30px;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+        """)
+        btn.enterEvent = lambda e, b=btn: (
+            b.setText("Return to Platform Selection"),
+            b.setFixedSize(380, 60),
+        )
+        btn.leaveEvent = lambda e, b=btn: (
+            b.setText("Return"),
+            b.setFixedSize(160, 60),
+        )
+        btn.clicked.connect(self._kill_game_and_return)
+
+        btn_win.show()
+        self._game_return_win = btn_win
+
+        # Make it TOPMOST via Win32
+        try:
+            import win32gui
+            import win32con
+            hwnd = int(btn_win.winId())
+            win32gui.SetWindowPos(
+                hwnd, win32con.HWND_TOPMOST,
+                0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+            )
+        except Exception:
+            pass
+
+    def _hide_game_return_button(self):
+        """Remove the floating return button."""
+        btn_win = getattr(self, '_game_return_win', None)
+        if btn_win:
+            try:
+                btn_win.hide()
+                btn_win.deleteLater()
+            except Exception:
+                pass
+            self._game_return_win = None
+
+    def _kill_game_and_return(self):
+        """Kill the running game process and return to the menu."""
+        proc = getattr(self, '_game_proc', None)
+        if proc:
+            try:
+                proc.terminate()
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            self._game_proc = None
+
+        # Also kill browser processes that might be lingering
+        for exe in ("chrome.exe", "firefox.exe"):
+            try:
+                subprocess.run(
+                    ["taskkill", "/IM", exe, "/F"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+
+        self._return_to_menu()
+
     def _check_game_exited(self):
         """Poll whether the launched game process has exited."""
         proc = getattr(self, '_game_proc', None)
         if proc is None or proc.poll() is not None:
-            # Game exited — return to menu
-            if hasattr(self, '_game_poll_timer'):
-                self._game_poll_timer.stop()
             self._game_proc = None
+            self._return_to_menu()
 
-            try:
-                send_status_to_server("menu")
-            except Exception:
-                pass
+    def _return_to_menu(self):
+        """Common logic: stop polling, hide return button, show menu."""
+        if hasattr(self, '_game_poll_timer'):
+            self._game_poll_timer.stop()
 
-            # Show menu again
-            self.stack.show()
-            self.showFullScreen()
-            self.raise_()
-            self.activateWindow()
+        self._hide_game_return_button()
+
+        try:
+            send_status_to_server("menu")
+        except Exception:
+            pass
+
+        # Show menu again
+        self.stack.show()
+        self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
     def __init__(self):
         super().__init__()
         # Register this kiosk menu process with the watchdog
