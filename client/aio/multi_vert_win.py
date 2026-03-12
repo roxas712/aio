@@ -811,6 +811,15 @@ QPushButton:hover {
                           f"container={c.card_container.geometry() if hasattr(c, 'card_container') else '?'}")
                 cards = c.card_container.findChildren(QPushButton) if hasattr(c, 'card_container') else []
                 log_debug(f"[DIAG] carousel cards={len(cards)}")
+                # Log each card's actual position for centering debug
+                from PyQt5.QtWidgets import QWidget as _QW
+                card_widgets = c.card_container.findChildren(_QW)
+                card_geos = [(w.objectName() or w.__class__.__name__, w.geometry()) for w in card_widgets if w.parent() is c.card_container]
+                for name, geo in card_geos:
+                    log_debug(f"[DIAG]   card {name}: x={geo.x()} y={geo.y()} w={geo.width()} h={geo.height()}")
+                # Also log carousel's position in screen coords
+                cpos = c.mapToGlobal(c.rect().topLeft())
+                log_debug(f"[DIAG] carousel global_pos=({cpos.x()},{cpos.y()}) container_w={c.card_container.width()}")
             if b:
                 log_debug(f"[DIAG] start_btn vis={b.isVisible()} geo={b.geometry()}")
             # Check layout items
