@@ -62,7 +62,7 @@ from win_common import (
 GAME_PID_FILE = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "config" / "game_pid.txt"
 
 # Ad/game split ratio
-AD_RATIO = 0.60
+AD_RATIO = 0.50
 GAME_RATIO = 0.40
 
 
@@ -835,11 +835,11 @@ QPushButton:hover {
             games=self.games,
             on_select=self.main_menu._game_selected,
             parent=self.main_menu,
-            center_size=QSize(220, 310),
-            side_size=QSize(180, 260),
-            container_size=QSize(1000, 380),
+            center_size=QSize(280, 390),
+            side_size=QSize(220, 310),
+            container_size=QSize(1080, 460),
             num_visible=5,
-            gap=-30,
+            gap=10,
         )
         # Remove internal padding and center the fixed-size card container
         new_carousel.layout().setContentsMargins(0, 0, 0, 0)
