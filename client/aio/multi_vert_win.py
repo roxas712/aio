@@ -1318,14 +1318,16 @@ QPushButton:hover {
                 else:
                     self._set_firefox_fullscreen_policy(True)
 
-                # Create a clean Firefox profile with prefs that suppress
-                # session restore and extra tabs (force single-window launch).
+                # Classic Online always uses this URL regardless of games.json
+                target = "https://cgweb.app/home/"
+
+                # Create a clean Firefox profile and write BOTH user.js and
+                # prefs.js to guarantee session-restore is disabled.
                 try:
                     FIREFOX_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-                    user_js = FIREFOX_PROFILE_DIR / "user.js"
-                    user_js.write_text(
-                        '// AIO – suppress session restore & extra tabs\n'
+                    _ff_prefs = (
                         'user_pref("browser.sessionstore.resume_from_crash", false);\n'
+                        'user_pref("browser.sessionstore.resume_session_once", false);\n'
                         'user_pref("browser.startup.homepage_override.mstone", "ignore");\n'
                         'user_pref("browser.startup.page", 0);\n'
                         'user_pref("browser.startup.homepage", "about:blank");\n'
@@ -1333,21 +1335,28 @@ QPushButton:hover {
                         'user_pref("datareporting.policy.dataSubmissionEnabled", false);\n'
                         'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);\n'
                         'user_pref("browser.rights.3.shown", true);\n'
-                        'user_pref("browser.startup.firstrunSkipsHomepage", true);\n',
-                        encoding="utf-8",
+                        'user_pref("browser.startup.firstrunSkipsHomepage", true);\n'
+                        'user_pref("browser.tabs.warnOnClose", false);\n'
+                    )
+                    (FIREFOX_PROFILE_DIR / "user.js").write_text(
+                        _ff_prefs, encoding="utf-8"
+                    )
+                    (FIREFOX_PROFILE_DIR / "prefs.js").write_text(
+                        _ff_prefs, encoding="utf-8"
                     )
                 except Exception:
                     pass
 
                 # Nuke stale session-restore data so Firefox won't reopen
                 # previously-crashed tabs alongside our target URL.
+                import shutil
                 for sf in ("sessionstore.jsonlz4", "sessionstore-backups"):
                     sp = FIREFOX_PROFILE_DIR / sf
                     try:
                         if sp.is_file():
                             sp.unlink()
                         elif sp.is_dir():
-                            import shutil; shutil.rmtree(sp, ignore_errors=True)
+                            shutil.rmtree(sp, ignore_errors=True)
                     except Exception:
                         pass
 
@@ -1362,13 +1371,13 @@ QPushButton:hover {
                         screen_w, screen_h = self._screen_size()
                         ad_h = int(screen_h * AD_RATIO)
                         game_h = screen_h - ad_h
-                        # Use a clean profile (no homepage/extra tabs) and
-                        # -new-window.  The title bar cover + frame stripping
-                        # hide the Firefox UI; kiosk mode fights resizing.
+                        # Launch with -no-remote (isolated instance) and our
+                        # clean profile.  No -new-window flag — it can cause
+                        # a second tab when combined with session restore.
                         proc = subprocess.Popen([
                             firefox_path,
+                            "-no-remote",
                             "-profile", str(FIREFOX_PROFILE_DIR),
-                            "-new-window",
                             f"-width", str(screen_w),
                             f"-height", str(game_h),
                             target,
