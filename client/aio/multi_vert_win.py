@@ -1102,9 +1102,23 @@ QPushButton:hover {
         # EXE-based platforms
         if gtype == "exe":
             log_debug(f"[VERT] Launching EXE: {target}")
-            proc = win_launch_game(game)
+            proc = None
+            if os.path.exists(target):
+                try:
+                    exe_dir = os.path.dirname(target)
+                    proc = subprocess.Popen(
+                        [target],
+                        cwd=exe_dir or None,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    log_debug(f"[VERT] EXE launched, PID={proc.pid}")
+                except Exception as e:
+                    log_debug(f"[VERT] EXE Popen exception: {e}")
+            else:
+                log_debug(f"[VERT] EXE not found at: {target}")
+
             if proc:
-                log_debug(f"[VERT] EXE launched, PID={proc.pid}")
                 self._store_game_pid(proc.pid, title)
 
                 if is_full_vertical:
