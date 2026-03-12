@@ -1511,41 +1511,27 @@ QPushButton:hover {
                 pass
 
         if is_browser:
-            # --- Browser path: reparent to block fullscreen ---
-            # Chrome --app= mode allows JS fullscreen (requestFullscreen).
-            # Reparenting as a child window prevents this at the OS level —
-            # child windows physically cannot go exclusive fullscreen.
-            # Unlike D3D EXE games, Chrome --app= handles input correctly
-            # after reparenting because it doesn't use exclusive rendering.
-            log_debug(f"[VERT] Browser game — reparenting to block fullscreen")
+            # --- Browser path: no reparenting (breaks Chrome input) ---
+            # Use SetWinEventHook for instant detection when Chrome tries to
+            # resize/move (e.g. JS fullscreen), and snap it back immediately.
+            log_debug(f"[VERT] Browser game — positioning + WinEvent hook")
 
             if game_hwnd:
                 try:
-                    our_hwnd = int(self.winId())
-                    log_debug(f"[VERT] Reparenting browser 0x{game_hwnd:08X} "
-                              f"into Qt 0x{our_hwnd:08X}")
-
-                    ctypes.windll.user32.SetParent(game_hwnd, our_hwnd)
-
-                    # Child window style, no frame
+                    # Remove title bar / frame
                     style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
-                    style &= ~(win32con.WS_POPUP | win32con.WS_CAPTION |
-                               win32con.WS_THICKFRAME | win32con.WS_SYSMENU |
-                               win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX)
-                    style |= win32con.WS_CHILD | win32con.WS_VISIBLE
+                    style &= ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
+                               win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
+                               win32con.WS_MAXIMIZEBOX)
+                    style |= win32con.WS_VISIBLE
                     win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, style)
-
-                    ex_style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_EXSTYLE)
-                    ex_style &= ~(win32con.WS_EX_TOPMOST | win32con.WS_EX_DLGMODALFRAME)
-                    win32gui.SetWindowLong(game_hwnd, win32con.GWL_EXSTYLE, ex_style)
 
                     # Position in bottom 40%
                     win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
-
-                    rect = win32gui.GetWindowRect(game_hwnd)
-                    log_debug(f"[VERT] Browser reparented, rect={rect}")
+                    log_debug(f"[VERT] Browser positioned at 0,{ad_height} "
+                              f"size {screen_w}x{game_height}")
                 except Exception as e:
-                    log_debug(f"[VERT] Browser reparent failed: {e}")
+                    log_debug(f"[VERT] Browser positioning failed: {e}")
 
             # Show the regular Qt ad overlay
             if self.ad_overlay:
@@ -1553,35 +1539,19 @@ QPushButton:hover {
                 self.ad_overlay.raise_()
                 self.ad_overlay.resume()
 
-            # Clean up any previous topmost windows
-            for attr in ('_topmost_ad', '_topmost_return_btn'):
-                w = getattr(self, attr, None)
-                if w:
-                    try:
-                        w.hide()
-                        w.deleteLater()
-                    except Exception:
-                        pass
-                    setattr(self, attr, None)
-
             # Hide loading overlay
             if hasattr(self, '_loading_overlay'):
                 self._loading_overlay.hide_loading()
 
-            # Return button as TOPMOST (child widgets can't render above
-            # reparented Win32 child windows)
+            # Return button as TOPMOST window
             self._show_landscape_return_button_topmost(screen_w, ad_height)
 
             # Install keyboard hook to block Chrome shortcuts
             self._install_keyboard_hook()
 
-            # Keep re-positioning for a few seconds
-            self._reparent_count = 0
-            self._reparent_params = (game_hwnd, ad_height, screen_w, game_height)
-            self._reparent_timer = QTimer(self)
-            self._reparent_timer.setInterval(500)
-            self._reparent_timer.timeout.connect(self._reassert_reparent)
-            self._reparent_timer.start()
+            # Install WinEvent hook for instant fullscreen detection
+            self._browser_target_rect = (0, ad_height, screen_w, game_height)
+            self._install_winevent_hook(game_hwnd)
 
         else:
             # --- EXE path: reparent to break D3D exclusive fullscreen ---
@@ -1800,6 +1770,89 @@ QPushButton:hover {
             self._hook_proc_ref = None
 
     # --------------------------------------------------
+    # WinEvent Hook (instant fullscreen detection for browser games)
+    # --------------------------------------------------
+
+    def _install_winevent_hook(self, game_hwnd):
+        """Install SetWinEventHook to detect window move/resize instantly."""
+        if getattr(self, '_winevent_hook', None):
+            return
+
+        import ctypes
+        from ctypes import wintypes
+
+        EVENT_OBJECT_LOCATIONCHANGE = 0x800B
+        WINEVENT_OUTOFCONTEXT = 0x0000
+
+        # Get thread ID of the Chrome window
+        try:
+            thread_id, proc_id = win32process.GetWindowThreadProcessId(game_hwnd)
+        except Exception:
+            thread_id = 0
+            proc_id = 0
+
+        target_hwnd = game_hwnd
+        target_rect = self._browser_target_rect  # (x, y, w, h)
+
+        WINEVENTPROC = ctypes.CFUNCTYPE(
+            None,
+            wintypes.HANDLE,   # hWinEventHook
+            wintypes.DWORD,    # event
+            wintypes.HWND,     # hwnd
+            ctypes.c_long,     # idObject
+            ctypes.c_long,     # idChild
+            wintypes.DWORD,    # idEventThread
+            wintypes.DWORD,    # dwmsEventTime
+        )
+
+        def winevent_proc(hHook, event, hwnd, idObject, idChild, dwThread, dwTime):
+            if hwnd != target_hwnd:
+                return
+            try:
+                rect = win32gui.GetWindowRect(hwnd)
+                cur_x, cur_y, cur_r, cur_b = rect
+                cur_w = cur_r - cur_x
+                cur_h = cur_b - cur_y
+                tx, ty, tw, th = target_rect
+                if cur_x != tx or cur_y != ty or cur_w != tw or cur_h != th:
+                    # Chrome tried to escape — snap it back
+                    # Re-strip frame styles in case Chrome re-added them
+                    style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+                    style &= ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
+                               win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
+                               win32con.WS_MAXIMIZEBOX)
+                    style |= win32con.WS_VISIBLE
+                    win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+                    win32gui.MoveWindow(hwnd, tx, ty, tw, th, True)
+            except Exception:
+                pass
+
+        self._winevent_proc_ref = WINEVENTPROC(winevent_proc)
+        self._winevent_hook = ctypes.windll.user32.SetWinEventHook(
+            EVENT_OBJECT_LOCATIONCHANGE,  # eventMin
+            EVENT_OBJECT_LOCATIONCHANGE,  # eventMax
+            None,                         # hmodWinEventProc
+            self._winevent_proc_ref,      # pfnWinEventProc
+            proc_id,                      # idProcess (0 = all)
+            0,                            # idThread (0 = all threads)
+            WINEVENT_OUTOFCONTEXT,        # dwFlags
+        )
+        log_debug(f"[VERT] WinEvent hook installed: {self._winevent_hook} "
+                  f"pid={proc_id} hwnd=0x{game_hwnd:08X}")
+
+    def _remove_winevent_hook(self):
+        """Remove the WinEvent hook."""
+        hook = getattr(self, '_winevent_hook', None)
+        if hook:
+            try:
+                ctypes.windll.user32.UnhookWinEvent(hook)
+                log_debug("[VERT] WinEvent hook removed")
+            except Exception:
+                pass
+            self._winevent_hook = None
+            self._winevent_proc_ref = None
+
+    # --------------------------------------------------
     # Return Buttons
     # --------------------------------------------------
 
@@ -1926,6 +1979,7 @@ QPushButton:hover {
         if hasattr(self, '_reparent_timer'):
             self._reparent_timer.stop()
         self._remove_keyboard_hook()
+        self._remove_winevent_hook()
 
         # Un-reparent and hide the game window immediately
         game_hwnd = getattr(self, '_game_hwnd', None)
