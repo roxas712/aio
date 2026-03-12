@@ -71,12 +71,14 @@ GAME_RATIO = 0.40
 # ------------------------------------------------------
 
 class LoadingOverlay(QWidget):
-    """Dark overlay with centered text for loading/returning transitions."""
+    """Opaque dark overlay with centered text for loading/returning transitions."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_TranslucentBackground, False)
-        self.setStyleSheet("background-color: rgba(0, 0, 0, 220);")
+        self.setAutoFillBackground(True)
+        pal = self.palette()
+        pal.setColor(self.backgroundRole(), QColor(0, 0, 0))
+        self.setPalette(pal)
         self.hide()
 
         self._label = QLabel("Loading...", self)
@@ -85,7 +87,7 @@ class LoadingOverlay(QWidget):
             color: white;
             font-size: 36px;
             font-weight: bold;
-            background: transparent;
+            background: black;
         """)
 
     def resizeEvent(self, event):
@@ -1109,6 +1111,17 @@ QPushButton:hover {
         if hasattr(self, '_loading_overlay'):
             self._loading_overlay.show_loading("Loading...")
 
+        # Snapshot existing windows so we can find new ones after launch
+        self._pre_launch_hwnds = set()
+        try:
+            import win32gui as _wg
+            def _collect(hwnd, _):
+                if _wg.IsWindowVisible(hwnd):
+                    self._pre_launch_hwnds.add(hwnd)
+            _wg.EnumWindows(_collect, None)
+        except Exception:
+            pass
+
         QTimer.singleShot(1500, lambda g=game: self._vertical_launch_after_delay(g))
 
     def _store_game_pid(self, pid, title):
@@ -1265,10 +1278,52 @@ QPushButton:hover {
     # Window Constraint (PID-based with retry)
     # --------------------------------------------------
 
+    def _constrain_window(self, hwnd, y_offset, screen_w, game_height):
+        """Remove borders and position a window into the bottom game region."""
+        title = win32gui.GetWindowText(hwnd)
+
+        # Restore if minimized
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        except Exception:
+            pass
+
+        # Remove window borders
+        try:
+            style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+            style &= ~(
+                win32con.WS_CAPTION | win32con.WS_THICKFRAME
+                | win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX
+                | win32con.WS_SYSMENU
+            )
+            win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+        except Exception:
+            pass
+
+        # Remove extended style borders
+        try:
+            ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+            ex_style &= ~(
+                win32con.WS_EX_DLGMODALFRAME
+                | win32con.WS_EX_CLIENTEDGE
+                | win32con.WS_EX_STATICEDGE
+            )
+            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, ex_style)
+        except Exception:
+            pass
+
+        # Position into bottom game region
+        win32gui.SetWindowPos(
+            hwnd, None,
+            0, y_offset, screen_w, game_height,
+            win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED | win32con.SWP_SHOWWINDOW
+        )
+        log_debug(f"[VERT] Constrained hwnd={hwnd} title='{title}' to (0,{y_offset},{screen_w},{game_height})")
+
     def _constrain_landscape_window(self, pid, retries=10):
         """
         Constrain launched platform window into bottom 40% of portrait screen.
-        Uses PID-based matching first, then falls back to exe-name matching.
+        Strategy: PID match → exe-name match → new-window detection (snapshot diff).
         """
         if self.ad_overlay:
             self.ad_overlay.show()
@@ -1288,7 +1343,7 @@ QPushButton:hover {
         except Exception:
             pids = {pid}
 
-        # Fallback: find all PIDs matching the exe name (handles launcher-spawned processes)
+        # Fallback: find all PIDs matching the exe name
         if exe_name:
             try:
                 for p in psutil.process_iter(['pid', 'name']):
@@ -1299,10 +1354,18 @@ QPushButton:hover {
 
         found = False
         our_pid = os.getpid()
+        pre_launch = getattr(self, '_pre_launch_hwnds', set())
 
         def enum_handler(hwnd, _):
             nonlocal found
             if not win32gui.IsWindowVisible(hwnd):
+                return
+
+            # Skip tiny windows
+            rect = win32gui.GetWindowRect(hwnd)
+            w = rect[2] - rect[0]
+            h = rect[3] - rect[1]
+            if w < 200 or h < 200:
                 return
 
             try:
@@ -1310,56 +1373,20 @@ QPushButton:hover {
             except Exception:
                 return
 
-            if win_pid not in pids or win_pid == our_pid:
+            if win_pid == our_pid:
                 return
 
-            # Skip tiny/invisible windows (splash screens, hidden helpers)
-            rect = win32gui.GetWindowRect(hwnd)
-            w = rect[2] - rect[0]
-            h = rect[3] - rect[1]
-            if w < 100 or h < 100:
+            # Match by PID or by "new window" (not in pre-launch snapshot)
+            pid_match = win_pid in pids
+            new_window = hwnd not in pre_launch and len(pre_launch) > 0
+
+            if not pid_match and not new_window:
                 return
 
+            match_reason = "pid" if pid_match else "new_window"
             found = True
-            title = win32gui.GetWindowText(hwnd)
-
-            # Restore if minimized
-            try:
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-            except Exception:
-                pass
-
-            # Remove window borders
-            try:
-                style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-                style &= ~(
-                    win32con.WS_CAPTION | win32con.WS_THICKFRAME
-                    | win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX
-                    | win32con.WS_SYSMENU
-                )
-                win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
-            except Exception:
-                pass
-
-            # Remove extended style borders
-            try:
-                ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-                ex_style &= ~(
-                    win32con.WS_EX_DLGMODALFRAME
-                    | win32con.WS_EX_CLIENTEDGE
-                    | win32con.WS_EX_STATICEDGE
-                )
-                win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, ex_style)
-            except Exception:
-                pass
-
-            # Position into bottom 40%
-            win32gui.SetWindowPos(
-                hwnd, None,
-                0, y_offset, screen_w, game_height,
-                win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED | win32con.SWP_SHOWWINDOW
-            )
-            log_debug(f"[VERT] Constrained hwnd={hwnd} pid={win_pid} title='{title}' to (0,{y_offset},{screen_w},{game_height})")
+            self._constrain_window(hwnd, y_offset, screen_w, game_height)
+            log_debug(f"[VERT] Match reason={match_reason} win_pid={win_pid}")
 
         try:
             win32gui.EnumWindows(enum_handler, None)
