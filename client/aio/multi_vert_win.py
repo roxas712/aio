@@ -1526,16 +1526,13 @@ QPushButton:hover {
 
             if game_hwnd:
                 try:
-                    # Remove title bar / frame
-                    style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
-                    style &= ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
-                               win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
-                               win32con.WS_MAXIMIZEBOX)
-                    style |= win32con.WS_VISIBLE
-                    win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, style)
-
+                    self._strip_chrome_frame(game_hwnd)
                     # Position in bottom 40%
-                    win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
+                    win32gui.SetWindowPos(
+                        game_hwnd, None,
+                        0, ad_height, screen_w, game_height,
+                        win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED
+                    )
                     log_debug(f"[VERT] Browser positioned at 0,{ad_height} "
                               f"size {screen_w}x{game_height}")
                 except Exception as e:
@@ -1557,6 +1554,9 @@ QPushButton:hover {
             # Install WinEvent hook for instant fullscreen/resize detection
             self._browser_target_rect = (0, ad_height, screen_w, game_height)
             self._install_winevent_hook(game_hwnd)
+
+            # Install keyboard hook to block Ctrl+W/T/N (closing/opening windows)
+            self._install_keyboard_hook()
 
             # Keep stripping title bar (Chrome re-adds it on page load/navigation)
             self._reparent_count = 0
@@ -1669,6 +1669,15 @@ QPushButton:hover {
         except Exception:
             pass
 
+    @staticmethod
+    def _strip_chrome_frame(hwnd):
+        """Force Chrome window to have zero frame/title bar."""
+        # Set style to bare popup — no caption, no frame, no system menu
+        target_style = win32con.WS_POPUP | win32con.WS_VISIBLE | win32con.WS_CLIPSIBLINGS
+        win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, target_style)
+        # Remove all extended decorations
+        win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, 0)
+
     def _reassert_browser_position(self):
         """Keep stripping title bar and repositioning browser window."""
         game_hwnd, ad_height, screen_w, game_height = self._reparent_params
@@ -1681,15 +1690,10 @@ QPushButton:hover {
                 self._reparent_timer.stop()
                 return
 
-            # Always strip title bar (Chrome re-adds on navigation/fullscreen)
+            # Always strip frame (Chrome likes to re-add its title bar)
             style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
-            clean_style = style & ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
-                                    win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
-                                    win32con.WS_MAXIMIZEBOX)
-            clean_style |= win32con.WS_VISIBLE
-            if style != clean_style:
-                win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, clean_style)
-                # SWP_FRAMECHANGED forces Windows to re-apply frame change
+            if style & win32con.WS_CAPTION:
+                self._strip_chrome_frame(game_hwnd)
                 win32gui.SetWindowPos(
                     game_hwnd, None,
                     0, ad_height, screen_w, game_height,
@@ -1702,7 +1706,11 @@ QPushButton:hover {
             cur_w = cur_r - cur_x
             cur_h = cur_b - cur_y
             if cur_x != 0 or cur_y != ad_height or cur_w != screen_w or cur_h != game_height:
-                win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
+                win32gui.SetWindowPos(
+                    game_hwnd, None,
+                    0, ad_height, screen_w, game_height,
+                    win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED
+                )
         except Exception:
             pass
 
@@ -1711,29 +1719,15 @@ QPushButton:hover {
     # --------------------------------------------------
 
     def _install_keyboard_hook(self):
-        """Install a low-level keyboard hook to block Ctrl+W/T/N/L/etc."""
+        """Install a low-level keyboard hook to block only Ctrl+W/T/N."""
         if getattr(self, '_kb_hook', None):
             return  # already installed
 
         import ctypes
         from ctypes import wintypes
 
-        WH_KEYBOARD_LL = 13
-        HC_ACTION = 0
-        WM_KEYDOWN = 0x0100
-        WM_SYSKEYDOWN = 0x0104
-
-        # Keys to block when Ctrl is held (Chrome shortcuts)
-        BLOCKED_VKEYS = {
-            0x57,  # W — close tab
-            0x54,  # T — new tab
-            0x4E,  # N — new window
-            0x4C,  # L — focus address bar
-            0x52,  # R — reload
-            0x48,  # H — history
-            0x4A,  # J — downloads
-            0x44,  # D — bookmark
-        }
+        # Only block the 3 most dangerous Chrome shortcuts
+        BLOCKED_CTRL = {0x57, 0x54, 0x4E}  # W, T, N
 
         HOOKPROC = ctypes.CFUNCTYPE(
             ctypes.c_long, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
@@ -1748,19 +1742,19 @@ QPushButton:hover {
                 ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
             ]
 
+        user32 = ctypes.windll.user32
+
         def hook_proc(nCode, wParam, lParam):
-            if nCode == HC_ACTION and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
+            if nCode >= 0:
                 kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-                # Only block Ctrl+<key> Chrome shortcuts
-                ctrl_down = ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000
-                if ctrl_down and kb.vkCode in BLOCKED_VKEYS:
-                    return 1  # block
-            return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
+                if kb.vkCode in BLOCKED_CTRL:
+                    # Only block if Ctrl is actually held right now
+                    if user32.GetKeyState(0x11) & 0x8000:
+                        return 1
+            return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
         self._hook_proc_ref = HOOKPROC(hook_proc)  # prevent GC
-        self._kb_hook = ctypes.windll.user32.SetWindowsHookExW(
-            WH_KEYBOARD_LL, self._hook_proc_ref, None, 0
-        )
+        self._kb_hook = user32.SetWindowsHookExW(13, self._hook_proc_ref, None, 0)
         log_debug(f"[VERT] Keyboard hook installed: {self._kb_hook}")
 
     def _remove_keyboard_hook(self):
@@ -1821,15 +1815,15 @@ QPushButton:hover {
                 cur_h = cur_b - cur_y
                 tx, ty, tw, th = target_rect
                 if cur_x != tx or cur_y != ty or cur_w != tw or cur_h != th:
-                    # Chrome tried to escape — snap it back
-                    # Re-strip frame styles in case Chrome re-added them
-                    style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-                    style &= ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
-                               win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
-                               win32con.WS_MAXIMIZEBOX)
-                    style |= win32con.WS_VISIBLE
-                    win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
-                    win32gui.MoveWindow(hwnd, tx, ty, tw, th, True)
+                    # Chrome tried to escape — force popup style and snap back
+                    target_style = (win32con.WS_POPUP | win32con.WS_VISIBLE |
+                                    win32con.WS_CLIPSIBLINGS)
+                    win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, target_style)
+                    win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, 0)
+                    win32gui.SetWindowPos(
+                        hwnd, None, tx, ty, tw, th,
+                        win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED
+                    )
             except Exception:
                 pass
 
