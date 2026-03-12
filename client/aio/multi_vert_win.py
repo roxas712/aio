@@ -1576,20 +1576,12 @@ QPushButton:hover {
             except Exception:
                 pass
 
-        btn = QPushButton("Return to Platform Selection", self)
-        btn.setFixedSize(360, 70)
-        btn.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545;
-                color: white;
-                font-size: 20px;
-                font-weight: bold;
-                border-radius: 35px;
-            }
-            QPushButton:hover {
-                background-color: #c82333;
-            }
-        """)
+        btn = QPushButton("Return", self)
+        btn.setFixedSize(160, 70)
+        btn.setStyleSheet(self._return_btn_style())
+        btn.enterEvent = lambda e, b=btn: self._expand_return_btn(b)
+        btn.leaveEvent = lambda e, b=btn: self._collapse_return_btn(b)
+        btn.clicked.connect(self.return_to_main)
 
         _, screen_h = self._screen_size()
         game_y = screen_h - int(screen_h * GAME_RATIO)
@@ -1597,7 +1589,6 @@ QPushButton:hover {
         btn.move(30, game_y + 30)
         btn.raise_()
         btn.show()
-        btn.clicked.connect(self.return_to_main)
         self._landscape_return_btn = btn
 
     def _show_landscape_return_button_topmost(self, screen_w, ad_height):
@@ -1610,23 +1601,14 @@ QPushButton:hover {
 
         btn_win = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         btn_win.setAttribute(Qt.WA_TranslucentBackground)
-        btn_win.setGeometry(0, ad_height, 420, 100)
+        btn_win.setGeometry(0, ad_height, 500, 100)
 
-        btn = QPushButton("Return to Platform Selection", btn_win)
-        btn.setFixedSize(360, 70)
+        btn = QPushButton("Return", btn_win)
+        btn.setFixedSize(160, 70)
         btn.move(30, 15)
-        btn.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545;
-                color: white;
-                font-size: 20px;
-                font-weight: bold;
-                border-radius: 35px;
-            }
-            QPushButton:hover {
-                background-color: #c82333;
-            }
-        """)
+        btn.setStyleSheet(self._return_btn_style())
+        btn.enterEvent = lambda e, b=btn, w=btn_win: self._expand_return_btn(b, w)
+        btn.leaveEvent = lambda e, b=btn, w=btn_win: self._collapse_return_btn(b, w)
         btn.clicked.connect(self.return_to_main)
 
         btn_win.show()
@@ -1641,20 +1623,11 @@ QPushButton:hover {
             except Exception:
                 pass
 
-        btn = QPushButton("Return to Platform Selection", self)
-        btn.setFixedSize(360, 70)
-        btn.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545;
-                color: white;
-                font-size: 20px;
-                font-weight: bold;
-                border-radius: 35px;
-            }
-            QPushButton:hover {
-                background-color: #c82333;
-            }
-        """)
+        btn = QPushButton("Return", self)
+        btn.setFixedSize(160, 70)
+        btn.setStyleSheet(self._return_btn_style())
+        btn.enterEvent = lambda e, b=btn: self._expand_return_btn(b)
+        btn.leaveEvent = lambda e, b=btn: self._collapse_return_btn(b)
 
         _, screen_h = self._screen_size()
         game_y = screen_h - int(screen_h * GAME_RATIO)
@@ -1666,6 +1639,37 @@ QPushButton:hover {
 
     # --------------------------------------------------
     # Vertical Return Override
+    # --- Return button helpers -------------------------------------------
+
+    @staticmethod
+    def _return_btn_style():
+        return """
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                font-size: 20px;
+                font-weight: bold;
+                border-radius: 35px;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+        """
+
+    @staticmethod
+    def _expand_return_btn(btn, container=None):
+        btn.setText("Return to Platform Selection")
+        btn.setFixedSize(400, 70)
+        if container:
+            container.setFixedWidth(500)
+
+    @staticmethod
+    def _collapse_return_btn(btn, container=None):
+        btn.setText("Return")
+        btn.setFixedSize(160, 70)
+        if container:
+            container.setFixedWidth(250)
+
     # --------------------------------------------------
 
     def return_to_main(self):
