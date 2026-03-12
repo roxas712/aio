@@ -1328,10 +1328,27 @@ QPushButton:hover {
         if self.ad_overlay:
             self.ad_overlay.show()
 
-        screen_w, screen_h = self._screen_size()
+        # Get physical screen size via DPI-aware API
+        user32 = ctypes.windll.user32
+        try:
+            # Make this thread DPI-aware so GetSystemMetrics returns physical pixels
+            user32.SetProcessDPIAware()
+        except Exception:
+            pass
+        phys_w = user32.GetSystemMetrics(0)
+        phys_h = user32.GetSystemMetrics(1)
+
+        # Also get Qt logical size
+        qt_w, qt_h = self._screen_size()
+
+        # SetWindowPos needs physical pixels — use GetSystemMetrics values
+        screen_w = phys_w
+        screen_h = phys_h
+
         game_height = int(screen_h * GAME_RATIO)
         y_offset = screen_h - game_height
-        log_debug(f"[VERT] Constrain target: screen={screen_w}x{screen_h} y={y_offset} h={game_height}")
+        log_debug(f"[VERT] Constrain target: phys={phys_w}x{phys_h} qt={qt_w}x{qt_h} "
+                  f"using={screen_w}x{screen_h} y={y_offset} h={game_height}")
 
         # Build set of PIDs to match: original + children + exe-name siblings
         exe_name = getattr(self, '_game_exe_name', None)
