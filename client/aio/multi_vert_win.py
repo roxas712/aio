@@ -758,7 +758,7 @@ class VerticalMultiWindow(MainWindow):
             mm_layout.insertStretch(1, 1)   # top padding in game area
             mm_layout.addStretch(1)          # bottom padding in game area
             mm_layout.setSpacing(15)
-            mm_layout.setContentsMargins(20, 0, 20, 10)
+            mm_layout.setContentsMargins(0, 0, 0, 10)
 
         # Shrink "Get Started" button for vertical and re-center it
         if hasattr(self.main_menu, 'start_btn'):
