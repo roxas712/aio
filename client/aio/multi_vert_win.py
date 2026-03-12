@@ -886,21 +886,23 @@ QPushButton:hover {
         old_carousel.setParent(None)
         old_carousel.deleteLater()
 
+        screen_w, _ = self._screen_size()
         new_carousel = CarouselWidget(
             games=self.games,
             on_select=self.main_menu._game_selected,
             parent=self.main_menu,
             center_size=QSize(300, 420),
             side_size=QSize(240, 340),
-            container_size=QSize(1040, 480),
+            container_size=QSize(screen_w, 480),
             num_visible=5,
             gap=-55,
         )
-        # Remove internal padding and center the fixed-size card container
+        # Fill full width — no alignment flags that could shift the container
         new_carousel.layout().setContentsMargins(0, 0, 0, 0)
-        new_carousel.layout().setAlignment(Qt.AlignCenter)
+        new_carousel.layout().setSpacing(0)
+        new_carousel.setFixedWidth(screen_w)
         self.main_menu.carousel = new_carousel
-        self.main_menu.layout().insertWidget(1, new_carousel, 0, Qt.AlignHCenter)
+        self.main_menu.layout().insertWidget(1, new_carousel)
 
     def _on_volume_changed(self, vol):
         if self.ad_overlay:
