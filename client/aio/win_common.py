@@ -212,7 +212,7 @@ DEFAULT_GAMES: List[Dict[str, Any]] = [
     {
         "title": "Classic Online",
         "type": "url",
-        "target": "https://cgweb.app/games/",
+        "target": "https://cgweb.app/home/",
         "img": str(KIOSK_DIR / "img" / "classic.png"),
         "orientation": "landscape",
     },
