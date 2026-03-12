@@ -268,15 +268,23 @@ class AdLoopWidget(QWidget):
                 if not ret:
                     return
 
-        # Use parent widget dimensions (more reliable than label during layout)
-        target_w = self.width()
-        target_h = self.height()
+        # Use screen geometry for target size — self.width() can return
+        # DPI-scaled values (e.g. 2360 instead of 1080) on Windows
+        screen = self.window().screen() if self.window() else None
+        if screen:
+            sg = screen.geometry()
+            target_w = sg.width()
+            target_h = int(sg.height() * AD_RATIO)
+        else:
+            target_w = self.width()
+            target_h = self.height()
 
         # Log first frame dimensions for debugging
         self._frame_count = getattr(self, '_frame_count', 0) + 1
         if self._frame_count == 1:
             log_debug(f"[AD] First frame: video={frame.shape[1]}x{frame.shape[0]}, "
-                      f"target={target_w}x{target_h}")
+                      f"target={target_w}x{target_h}, "
+                      f"widget={self.width()}x{self.height()}")
 
         if target_w > 0 and target_h > 0:
             frame = self._cv2.resize(frame, (target_w, target_h),
