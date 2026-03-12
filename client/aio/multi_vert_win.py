@@ -1353,15 +1353,19 @@ QPushButton:hover {
                 self._store_game_pid(proc.pid, title)
                 self._show_fullscreen_return_button()
             else:
-                # Use --kiosk so Chrome has zero UI chrome and all keyboard
-                # shortcuts (Ctrl+W, Ctrl+T, etc.) are disabled.
-                # Do NOT reparent browser games — that breaks kiosk mode.
-                # Instead overlay ads as TOPMOST on top of the kiosk window.
+                # Use --app= mode so Chrome has no tabs/address bar.
+                # Position directly in the bottom 40% so the game renders
+                # at the correct viewport size (1080x768).
+                # A low-level keyboard hook blocks Ctrl+W/T/N while active.
+                screen_w, screen_h = self._screen_size()
+                ad_h = int(screen_h * AD_RATIO)
+                game_h = screen_h - ad_h
                 proc = subprocess.Popen([
                     chrome_path,
-                    "--kiosk",
+                    f"--app={target}",
                     *common_flags,
-                    target,
+                    f"--window-size={screen_w},{game_h}",
+                    f"--window-position=0,{ad_h}",
                 ])
                 self._store_game_pid(proc.pid, title)
                 self._game_exe_name = "chrome.exe"
@@ -1492,35 +1496,52 @@ QPushButton:hover {
                 pass
 
         if is_browser:
-            # --- Browser path: no reparenting, TOPMOST ad overlay ---
-            log_debug(f"[VERT] Browser game — using TOPMOST overlay (no reparent)")
+            # --- Browser path: no reparenting ---
+            # Chrome is in --app= mode, already sized to 1080x768 at y=1152.
+            # Just reposition to make sure it's in the right spot, remove
+            # title bar, and show ads + return button normally.
+            log_debug(f"[VERT] Browser game — positioning window (no reparent)")
 
-            # Hide Qt ad overlay — we'll use a TOPMOST window instead
+            if game_hwnd:
+                try:
+                    # Remove title bar and resize/move borders
+                    style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
+                    style &= ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
+                               win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
+                               win32con.WS_MAXIMIZEBOX)
+                    style |= win32con.WS_VISIBLE
+                    win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, style)
+
+                    # Position in bottom 40%
+                    win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
+                    log_debug(f"[VERT] Browser window positioned at 0,{ad_height} "
+                              f"size {screen_w}x{game_height}")
+                except Exception as e:
+                    log_debug(f"[VERT] Browser window positioning failed: {e}")
+
+            # Show the regular Qt ad overlay (Chrome isn't fullscreen, so it's visible)
             if self.ad_overlay:
-                self.ad_overlay.hide()
-
-            # Create a TOPMOST ad overlay window covering the top 60%
-            topmost_ad = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-            topmost_ad.setGeometry(0, 0, screen_w, ad_height)
-            topmost_ad.setAutoFillBackground(True)
-
-            # Re-create the ad loop inside the TOPMOST window
-            ad_widget = AdLoopWidget(topmost_ad)
-            ad_widget.setGeometry(0, 0, screen_w, ad_height)
-            ad_widget.show()
-            ad_widget.resume()
-
-            topmost_ad.show()
-            self._topmost_ad = topmost_ad
-            self._topmost_ad_widget = ad_widget
-            self._make_overlay_topmost(topmost_ad)
+                self.ad_overlay.show()
+                self.ad_overlay.raise_()
+                self.ad_overlay.resume()
 
             # Hide loading overlay
             if hasattr(self, '_loading_overlay'):
                 self._loading_overlay.hide_loading()
 
-            # Show return button as TOPMOST
+            # Show return button as TOPMOST (needs to be above Chrome window)
             self._show_landscape_return_button_topmost(screen_w, ad_height)
+
+            # Install keyboard hook to block Chrome shortcuts
+            self._install_keyboard_hook()
+
+            # Keep repositioning browser for a few seconds (it may resize on load)
+            self._reparent_count = 0
+            self._reparent_params = (game_hwnd, ad_height, screen_w, game_height)
+            self._reparent_timer = QTimer(self)
+            self._reparent_timer.setInterval(500)
+            self._reparent_timer.timeout.connect(self._reassert_browser_position)
+            self._reparent_timer.start()
 
         else:
             # --- EXE path: reparent to break D3D exclusive fullscreen ---
@@ -1624,6 +1645,106 @@ QPushButton:hover {
                 self.ad_overlay.raise_()
         except Exception:
             pass
+
+    def _reassert_browser_position(self):
+        """Keep repositioning the browser window (no reparenting)."""
+        self._reparent_count += 1
+        if self._reparent_count > 20:  # 10 seconds
+            self._reparent_timer.stop()
+            return
+
+        game_hwnd, ad_height, screen_w, game_height = self._reparent_params
+        if not game_hwnd:
+            self._reparent_timer.stop()
+            return
+
+        try:
+            if not win32gui.IsWindow(game_hwnd):
+                self._reparent_timer.stop()
+                return
+
+            # Remove title bar if it reappeared
+            style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
+            if style & win32con.WS_CAPTION:
+                style &= ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
+                           win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
+                           win32con.WS_MAXIMIZEBOX)
+                style |= win32con.WS_VISIBLE
+                win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, style)
+
+            # Re-position
+            win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
+        except Exception:
+            pass
+
+    # --------------------------------------------------
+    # Keyboard Hook (block Chrome shortcuts while game is active)
+    # --------------------------------------------------
+
+    def _install_keyboard_hook(self):
+        """Install a low-level keyboard hook to block Ctrl+W/T/N/L/etc."""
+        if getattr(self, '_kb_hook', None):
+            return  # already installed
+
+        import ctypes
+        from ctypes import wintypes
+
+        WH_KEYBOARD_LL = 13
+        HC_ACTION = 0
+        WM_KEYDOWN = 0x0100
+        WM_SYSKEYDOWN = 0x0104
+
+        # Keys to block when Ctrl is held (Chrome shortcuts)
+        BLOCKED_VKEYS = {
+            0x57,  # W — close tab
+            0x54,  # T — new tab
+            0x4E,  # N — new window
+            0x4C,  # L — focus address bar
+            0x52,  # R — reload
+            0x48,  # H — history
+            0x4A,  # J — downloads
+            0x44,  # D — bookmark
+        }
+
+        HOOKPROC = ctypes.CFUNCTYPE(
+            ctypes.c_long, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+        )
+
+        class KBDLLHOOKSTRUCT(ctypes.Structure):
+            _fields_ = [
+                ("vkCode", wintypes.DWORD),
+                ("scanCode", wintypes.DWORD),
+                ("flags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+            ]
+
+        def hook_proc(nCode, wParam, lParam):
+            if nCode == HC_ACTION and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
+                kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                ctrl_down = ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000
+                if ctrl_down and kb.vkCode in BLOCKED_VKEYS:
+                    log_debug(f"[VERT] Blocked Ctrl+{chr(kb.vkCode)}")
+                    return 1  # block the key
+            return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+        self._hook_proc_ref = HOOKPROC(hook_proc)  # prevent GC
+        self._kb_hook = ctypes.windll.user32.SetWindowsHookExW(
+            WH_KEYBOARD_LL, self._hook_proc_ref, None, 0
+        )
+        log_debug(f"[VERT] Keyboard hook installed: {self._kb_hook}")
+
+    def _remove_keyboard_hook(self):
+        """Remove the low-level keyboard hook."""
+        hook = getattr(self, '_kb_hook', None)
+        if hook:
+            try:
+                ctypes.windll.user32.UnhookWindowsHookEx(hook)
+                log_debug("[VERT] Keyboard hook removed")
+            except Exception:
+                pass
+            self._kb_hook = None
+            self._hook_proc_ref = None
 
     # --------------------------------------------------
     # Return Buttons
@@ -1748,9 +1869,10 @@ QPushButton:hover {
         """Vertical-safe return: kill game immediately, show overlay, restore UI after delay."""
         log_debug("[VERT] Return requested")
 
-        # Stop reparent timer
+        # Stop reparent timer and remove keyboard hook
         if hasattr(self, '_reparent_timer'):
             self._reparent_timer.stop()
+        self._remove_keyboard_hook()
 
         # Un-reparent and hide the game window immediately
         game_hwnd = getattr(self, '_game_hwnd', None)
