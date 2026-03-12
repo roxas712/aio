@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "AIO Disable Fullscreen",
+  "version": "1.0",
+  "description": "Prevents game websites from entering fullscreen mode",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["disable_fs.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

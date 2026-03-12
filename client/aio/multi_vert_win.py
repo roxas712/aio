@@ -1326,6 +1326,9 @@ QPushButton:hover {
         except Exception:
             pass
 
+        # Path to extension that disables the JS Fullscreen API
+        nofs_ext = str(Path(__file__).resolve().parent / "chrome_ext_nofs")
+
         # Common flags for a clean, chromeless browser session
         common_flags = [
             f"--user-data-dir={str(CHROME_PROFILE_DIR)}",
@@ -1334,7 +1337,6 @@ QPushButton:hover {
             "--disable-infobars",
             "--disable-session-crashed-bubble",
             "--disable-features=DesktopPWAs,WebAppInstall",
-            "--disable-extensions",
             "--disable-save-password-bubble",
             "--disable-sync",
             "--disable-notifications",
@@ -1342,9 +1344,11 @@ QPushButton:hover {
 
         try:
             if is_full_vertical:
+                # Full vertical: kiosk mode, no fullscreen-blocking extension
                 proc = subprocess.Popen([
                     chrome_path,
                     "--kiosk",
+                    "--disable-extensions",
                     *common_flags,
                     target,
                 ])
@@ -1364,6 +1368,7 @@ QPushButton:hover {
                     chrome_path,
                     f"--app={target}",
                     *common_flags,
+                    f"--load-extension={nofs_ext}",
                     f"--window-size={screen_w},{game_h}",
                     f"--window-position=0,{ad_h}",
                 ])
