@@ -1282,6 +1282,13 @@ QPushButton:hover {
         """Remove borders and position a window into the bottom game region."""
         title = win32gui.GetWindowText(hwnd)
 
+        # Log current position before moving
+        try:
+            rect = win32gui.GetWindowRect(hwnd)
+            log_debug(f"[VERT] Window '{title}' BEFORE: rect={rect}")
+        except Exception:
+            pass
+
         # Restore if minimized
         try:
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
@@ -1318,7 +1325,13 @@ QPushButton:hover {
             0, y_offset, screen_w, game_height,
             win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED | win32con.SWP_SHOWWINDOW
         )
-        log_debug(f"[VERT] Constrained hwnd={hwnd} title='{title}' to (0,{y_offset},{screen_w},{game_height})")
+
+        # Verify position after moving
+        try:
+            rect = win32gui.GetWindowRect(hwnd)
+            log_debug(f"[VERT] Window '{title}' AFTER: rect={rect} (target: 0,{y_offset},{screen_w},{y_offset + game_height})")
+        except Exception:
+            pass
 
     def _constrain_landscape_window(self, pid, retries=10):
         """
@@ -1400,6 +1413,7 @@ QPushButton:hover {
 
             match_reason = "pid" if pid_match else "new_window"
             found = True
+            self._game_hwnd = hwnd
             self._constrain_window(hwnd, y_offset, screen_w, game_height)
             log_debug(f"[VERT] Match reason={match_reason} win_pid={win_pid}")
 
@@ -1413,6 +1427,13 @@ QPushButton:hover {
             if hasattr(self, '_loading_overlay'):
                 self._loading_overlay.hide_loading()
             self._show_landscape_return_button()
+            # Keep re-constraining for a few seconds (game may reposition itself)
+            self._constrain_count = 0
+            self._constrain_params = (y_offset, screen_w, game_height)
+            self._reconstrain_timer = QTimer(self)
+            self._reconstrain_timer.setInterval(500)
+            self._reconstrain_timer.timeout.connect(self._reconstrain_game)
+            self._reconstrain_timer.start()
         elif retries > 0:
             QTimer.singleShot(
                 1000,
@@ -1425,6 +1446,27 @@ QPushButton:hover {
             if hasattr(self, '_loading_overlay'):
                 self._loading_overlay.hide_loading()
             self._show_landscape_return_button()
+
+    def _reconstrain_game(self):
+        """Periodically re-constrain game window (games may reposition themselves)."""
+        self._constrain_count += 1
+        if self._constrain_count > 20:  # Stop after 10 seconds (20 * 500ms)
+            self._reconstrain_timer.stop()
+            return
+
+        hwnd = getattr(self, '_game_hwnd', None)
+        if not hwnd:
+            self._reconstrain_timer.stop()
+            return
+
+        try:
+            if not win32gui.IsWindow(hwnd):
+                self._reconstrain_timer.stop()
+                return
+            y_offset, screen_w, game_height = self._constrain_params
+            self._constrain_window(hwnd, y_offset, screen_w, game_height)
+        except Exception:
+            self._reconstrain_timer.stop()
 
     # --------------------------------------------------
     # Return Buttons
@@ -1500,6 +1542,11 @@ QPushButton:hover {
     def return_to_main(self):
         """Vertical-safe return: show returning overlay, kill game, restore UI."""
         log_debug("[VERT] Return requested")
+
+        # Stop re-constrain timer
+        if hasattr(self, '_reconstrain_timer'):
+            self._reconstrain_timer.stop()
+        self._game_hwnd = None
 
         # Remove return buttons immediately
         for attr in ("_vertical_return_btn", "_landscape_return_btn"):
