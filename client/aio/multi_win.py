@@ -51,6 +51,100 @@ class AdOverlay(QWidget):
         label.setAlignment(Qt.AlignCenter)
         label.setStyleSheet("color: white; font-size: 36px;")
         layout.addWidget(label)
+
+# ------------------------------------------------------
+# Loading Overlay (animated neon bar)
+# ------------------------------------------------------
+
+class LoadingOverlay(QWidget):
+    """Dark overlay with centered text and animated neon loading bar."""
+
+    _BG = QColor(10, 10, 30)
+    _BAR_CYAN = QColor(0, 200, 255)
+    _BAR_PINK = QColor(255, 50, 150)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.hide()
+        self._text = "Loading…"
+        self._bar_pos = 0.0
+        self._bar_dir = 0.02
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(30)
+        self._timer.timeout.connect(self._animate)
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+
+        # Background
+        p.fillRect(0, 0, w, h, self._BG)
+
+        # Centered text
+        p.setPen(QColor(255, 255, 255))
+        font = QFont("Arial", 32, QFont.Bold)
+        p.setFont(font)
+        p.drawText(QRectF(0, h * 0.25, w, h * 0.3), Qt.AlignCenter, self._text)
+
+        # Loading bar
+        bar_w = int(w * 0.70)
+        bar_h = 8
+        bar_x = (w - bar_w) // 2
+        bar_y = int(h * 0.60)
+        radius = bar_h // 2
+
+        # Track
+        p.setBrush(QColor(40, 40, 60))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(bar_x, bar_y, bar_w, bar_h, radius, radius)
+
+        # Sweep indicator
+        sweep_w = int(bar_w * 0.30)
+        sweep_x = bar_x + int((bar_w - sweep_w) * self._bar_pos)
+
+        # Glow behind sweep
+        glow_grad = QtGui.QLinearGradient(sweep_x - 10, 0, sweep_x + sweep_w + 10, 0)
+        glow_grad.setColorAt(0.0, QColor(0, 200, 255, 0))
+        glow_grad.setColorAt(0.3, QColor(0, 200, 255, 80))
+        glow_grad.setColorAt(0.7, QColor(255, 50, 150, 80))
+        glow_grad.setColorAt(1.0, QColor(255, 50, 150, 0))
+        p.setBrush(glow_grad)
+        p.drawRoundedRect(sweep_x - 10, bar_y - 4, sweep_w + 20, bar_h + 8, radius + 2, radius + 2)
+
+        # Main bar gradient
+        bar_grad = QtGui.QLinearGradient(sweep_x, 0, sweep_x + sweep_w, 0)
+        bar_grad.setColorAt(0.0, self._BAR_PINK)
+        bar_grad.setColorAt(1.0, self._BAR_CYAN)
+        p.setBrush(bar_grad)
+        p.drawRoundedRect(sweep_x, bar_y, sweep_w, bar_h, radius, radius)
+
+        p.end()
+
+    def _animate(self):
+        self._bar_pos += self._bar_dir
+        if self._bar_pos >= 1.0:
+            self._bar_pos = 1.0
+            self._bar_dir = -abs(self._bar_dir)
+        elif self._bar_pos <= 0.0:
+            self._bar_pos = 0.0
+            self._bar_dir = abs(self._bar_dir)
+        self.update()
+
+    def show_loading(self, text="Loading…"):
+        self._text = text
+        self._bar_pos = 0.0
+        self._bar_dir = 0.02
+        self.raise_()
+        self.show()
+        self._timer.start()
+
+    def hide_loading(self):
+        self._timer.stop()
+        self.hide()
+
+
 CAROUSEL_ANIM_MS = 180
 CAROUSEL_COMMIT_MS = 180
 CAROUSEL_IDLE_ROTATE_MS = 1500
@@ -604,7 +698,7 @@ class BlurImageButton(QWidget):
         super().resizeEvent(event)
 
     def sizeHint(self):
-        return QSize(220, 160)
+        return QSize(220, 180)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -1167,8 +1261,8 @@ class GridMenu(QWidget):
             page_widget = QWidget(self.page_stack)
             page_widget.setAttribute(Qt.WA_TranslucentBackground)
             grid = QGridLayout(page_widget)
-            grid.setContentsMargins(40, 40, 40, 40)
-            grid.setSpacing(30)
+            grid.setContentsMargins(30, 20, 30, 10)
+            grid.setSpacing(16)
 
             start = page_idx * self.GAMES_PER_PAGE
             page_games = self.games[start:start + self.GAMES_PER_PAGE]
@@ -1365,117 +1459,127 @@ class MainWindow(QMainWindow):
 
     def _launch_game_after_delay(self, game: Dict[str, Any]) -> None:
         """
-        Actual platform launch logic, called after a short delay so that
-        loading.py has time to appear and cover the desktop.
+        Actual platform launch logic, called after the loading overlay appears.
+        Hides the Qt window and waits for the game process to exit, then
+        returns to the main menu.
         """
         title = game.get("title") or "Unknown"
         gtype = (game.get("type") or "url").lower().strip()
         target = game.get("target") or ""
         orientation = game.get("orientation", "landscape")
 
-        # EXE-based platforms (Orca, Fire Phoenix, River Sweeps, Tower Link, GDC, etc.)
+        proc = None
+
+        # EXE-based platforms
         if gtype == "exe":
-            # Launch native EXE using win_common (already does path + cwd check)
             proc = win_launch_game(game)
             if proc is None:
+                self._loading_overlay.hide_loading()
+                self.stack.show()
                 QMessageBox.warning(self, "Error", f"Failed to launch {title}.")
                 return
 
-            try:
-                CURRENT_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-                CURRENT_PID_FILE.write_text(str(proc.pid), encoding="utf-8")
-            except Exception:
-                pass
-
-            if self.terminal_type == "multi_vert" and orientation == "landscape":
-                try:
-                    self._constrain_window_portrait(title)
-                except Exception:
-                    pass
-
-            # Exit the multi selection app so only the game + loading UI remain
-            app = QApplication.instance()
-            if app is not None:
-                app.quit()
-            return
-
-        # URL-based platforms → launch in external browser full-screen
-        url = target
-        browser_cmd = None
-        title_lower = title.lower()
-
-        # Classic Online: requires Firefox
-        if title_lower == "classic online":
-            firefox_candidates = [
-                r"C:\\Program Files\\Mozilla Firefox\\firefox.exe",
-                r"C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe",
-            ]
-            for path in firefox_candidates:
-                if os.path.exists(path):
-                    # Firefox kiosk mode
-                    browser_cmd = [path, "-kiosk", url]
-                    break
         else:
-            # All other URL games → Chrome
-            chrome_candidates = [
-                r"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-                r"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-            ]
-            for path in chrome_candidates:
-                if os.path.exists(path):
-                    # Chrome kiosk mode with PWA install dialog permanently disabled, disposable profile
-                    browser_cmd = [
-                        path,
-                        "--kiosk",
-                        f"--user-data-dir={str(CHROME_PROFILE_DIR)}",
-                        "--disable-features=DesktopPWAs,WebAppInstall,WebAppIdentityProxy",
-                        "--disable-pwa-install",
-                        "--disable-infobars",
-                        "--disable-extensions",
-                        "--disable-pinch",
-                        "--disable-save-password-bubble",
-                        "--disable-session-crashed-bubble",
-                        "--disable-downloads",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                        "--disable-component-update",
-                        "--disable-background-networking",
-                        "--disable-sync",
-                        "--disable-notifications",
-                        "--disable-popup-blocking",
-                        url,
-                    ]
-                    break
+            # URL-based platforms → launch in external browser full-screen
+            url = target
+            browser_cmd = None
+            title_lower = title.lower()
 
-        if browser_cmd is None:
-            # Fallback: if we can't find the browser path, just use default browser without overlay
-            win_launch_game(game)
-            return
+            if title_lower == "classic online":
+                firefox_candidates = [
+                    r"C:\Program Files\Mozilla Firefox\firefox.exe",
+                    r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
+                ]
+                for path in firefox_candidates:
+                    if os.path.exists(path):
+                        browser_cmd = [path, "-kiosk", url]
+                        break
+            else:
+                chrome_candidates = [
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                ]
+                for path in chrome_candidates:
+                    if os.path.exists(path):
+                        browser_cmd = [
+                            path,
+                            "--kiosk",
+                            f"--user-data-dir={str(CHROME_PROFILE_DIR)}",
+                            "--disable-features=DesktopPWAs,WebAppInstall,WebAppIdentityProxy",
+                            "--disable-pwa-install",
+                            "--disable-infobars",
+                            "--disable-extensions",
+                            "--disable-pinch",
+                            "--disable-save-password-bubble",
+                            "--disable-session-crashed-bubble",
+                            "--disable-downloads",
+                            "--no-first-run",
+                            "--no-default-browser-check",
+                            "--disable-component-update",
+                            "--disable-background-networking",
+                            "--disable-sync",
+                            "--disable-notifications",
+                            "--disable-popup-blocking",
+                            url,
+                        ]
+                        break
 
-        # Launch the browser in kiosk mode
-        try:
+            if browser_cmd is None:
+                win_launch_game(game)
+                self._loading_overlay.hide_loading()
+                self.stack.show()
+                return
+
             try:
-                CHROME_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
-            proc = subprocess.Popen(browser_cmd)
+                try:
+                    CHROME_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                proc = subprocess.Popen(browser_cmd)
+            except Exception as e:
+                self._loading_overlay.hide_loading()
+                self.stack.show()
+                QMessageBox.critical(self, "Error", f"Failed to launch browser for {title}:\n{e}")
+                return
+
+        # Save PID for watchdog
+        if proc:
             try:
                 CURRENT_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
                 CURRENT_PID_FILE.write_text(str(proc.pid), encoding="utf-8")
             except Exception:
                 pass
-            if self.terminal_type == "multi_vert" and orientation == "landscape":
-                try:
-                    self._constrain_window_portrait(title)
-                except Exception:
-                    pass
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to launch browser for {title}:\n{e}")
-            return
 
-        app = QApplication.instance()
-        if app is not None:
-            app.quit()
+        # Hide loading + Qt window; game takes over the screen
+        self._loading_overlay.hide_loading()
+        self.hide()
+
+        # Poll for game exit, then return to menu
+        self._game_proc = proc
+        self._game_poll_timer = QTimer(self)
+        self._game_poll_timer.setInterval(2000)
+        self._game_poll_timer.timeout.connect(self._check_game_exited)
+        self._game_poll_timer.start()
+
+    def _check_game_exited(self):
+        """Poll whether the launched game process has exited."""
+        proc = getattr(self, '_game_proc', None)
+        if proc is None or proc.poll() is not None:
+            # Game exited — return to menu
+            if hasattr(self, '_game_poll_timer'):
+                self._game_poll_timer.stop()
+            self._game_proc = None
+
+            try:
+                send_status_to_server("menu")
+            except Exception:
+                pass
+
+            # Show menu again
+            self.stack.show()
+            self.showFullScreen()
+            self.raise_()
+            self.activateWindow()
     def __init__(self):
         super().__init__()
         # Register this kiosk menu process with the watchdog
@@ -1602,6 +1706,13 @@ class MainWindow(QMainWindow):
         user32 = ctypes.windll.user32
         screen_w = user32.GetSystemMetrics(0)
         screen_h = user32.GetSystemMetrics(1)
+
+        # Loading overlay (covers entire screen for horizontal mode)
+        central = self.centralWidget()
+        self._loading_overlay = LoadingOverlay(central)
+        self._loading_overlay.setFixedSize(screen_w, screen_h)
+        self._loading_overlay.move(0, 0)
+        self._loading_overlay.hide()
 
         self.setFixedSize(screen_w, screen_h)
         self.move(0, 0)
@@ -1819,9 +1930,9 @@ class MainWindow(QMainWindow):
         Launch a game from the multi-game menu.
 
         Flow:
-        - Start loading.py in "launch" mode so it can cover the desktop.
-        - Wait a short delay (2.5s) to allow loading UI to appear.
-        - Then actually launch the platform and quit multi_win.py.
+        - Show built-in loading overlay with animated neon bar.
+        - Hide the game selection UI.
+        - Wait a short delay, then launch the platform.
         """
         title = game.get("title") or "Unknown"
         target = game.get("target") or ""
@@ -1835,17 +1946,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", f"No target configured for {title}.")
             return
 
-        # Start loading.py in "launch" mode first so it can cover the desktop
-        if LOADING_SCRIPT.exists():
-            try:
-                subprocess.Popen([sys.executable, str(LOADING_SCRIPT), "launch"])
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to launch Loading overlay:\n{e}")
-                # We still let the game run even if loading UI fails
+        # Hide selection UI, show loading overlay
+        self.stack.hide()
+        self._loading_overlay.show_loading(f"Loading {title}…")
 
-        # Use a short delay to ensure the loading UI has time to appear
-        delay_ms = 2500  # 2.5 seconds
-        QTimer.singleShot(delay_ms, lambda g=game: self._launch_game_after_delay(g))
+        # Short delay then launch
+        QTimer.singleShot(1500, lambda g=game: self._launch_game_after_delay(g))
 
     # closeEvent override for EXE cleanup is no longer needed and removed.
 
