@@ -104,13 +104,17 @@ if (Test-Path $imgSrc) {
 $vidsSrc = "$kioskSrc\vids"
 $vidsDst = "$kioskDst\vids"
 if (Test-Path $vidsSrc) {
-    if (Test-Path $vidsDst) {
-        Remove-Item "$vidsDst\*" -Recurse -Force
-    } else {
+    if (-not (Test-Path $vidsDst)) {
         New-Item -ItemType Directory -Path $vidsDst -Force | Out-Null
     }
+    # Copy repo videos over (preserves manually-placed files on terminal)
     Get-ChildItem $vidsSrc -Exclude ".DS_Store" | Copy-Item -Destination $vidsDst -Recurse -Force
-    Write-Host "       -> kiosk\vids\ (all videos)"
+    # Remove any .mp4 that has a .mov replacement in the repo
+    Get-ChildItem $vidsSrc -Filter "*.mov" | ForEach-Object {
+        $oldMp4 = Join-Path $vidsDst ($_.BaseName + ".mp4")
+        if (Test-Path $oldMp4) { Remove-Item $oldMp4 -Force }
+    }
+    Write-Host "       -> kiosk\vids\ (videos updated, local files preserved)"
 }
 
 # ── Deploy agent files ────────────────────────────────────
