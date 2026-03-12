@@ -1328,12 +1328,10 @@ QPushButton:hover {
         if self.ad_overlay:
             self.ad_overlay.show()
 
-        user32 = ctypes.windll.user32
-        screen_w = user32.GetSystemMetrics(0)
-        screen_h = user32.GetSystemMetrics(1)
-
+        screen_w, screen_h = self._screen_size()
         game_height = int(screen_h * GAME_RATIO)
         y_offset = screen_h - game_height
+        log_debug(f"[VERT] Constrain target: screen={screen_w}x{screen_h} y={y_offset} h={game_height}")
 
         # Build set of PIDs to match: original + children + exe-name siblings
         exe_name = getattr(self, '_game_exe_name', None)
