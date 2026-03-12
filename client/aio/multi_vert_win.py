@@ -892,7 +892,7 @@ QPushButton:hover {
             parent=self.main_menu,
             center_size=QSize(300, 420),
             side_size=QSize(240, 340),
-            container_size=QSize(1080, 480),
+            container_size=QSize(1040, 480),
             num_visible=5,
             gap=-55,
         )
