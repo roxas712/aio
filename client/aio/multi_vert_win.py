@@ -240,14 +240,15 @@ class AdLoopWidget(QWidget):
         if self._fallback_label:
             return  # Already showing fallback
 
-        # Disconnect error signal; do NOT call stop()/hide() on video_widget
-        # — both trigger DirectShow re-entry at C level causing stack overflow.
+        # Do NOT touch the player or video_widget in ANY way here.
+        # Any call (stop, hide, setMuted, setMedia, setVolume) re-enters
+        # DirectShow at the C++ level causing a fatal stack overflow.
+        # Just disconnect the Python signal and layer fallback on top.
         if self.player:
             try:
                 self.player.error.disconnect(self._on_player_error)
             except Exception:
                 pass
-            self.player.setMuted(True)
 
         self._fallback_label = QLabel(self)
         self._fallback_label.setAlignment(Qt.AlignCenter)
@@ -269,19 +270,19 @@ class AdLoopWidget(QWidget):
 
         self._layout.addWidget(self._fallback_label)
         self._fallback_label.raise_()
+        log_debug("[AD] Fallback label shown over video widget")
 
-        # Defer video widget cleanup to avoid DirectShow crash
-        QTimer.singleShot(2000, self._safe_cleanup_video)
+        # Defer cleanup to 5s later — DirectShow must fully unwind first
+        QTimer.singleShot(5000, self._safe_cleanup_video)
 
     def _safe_cleanup_video(self):
         """Deferred cleanup of video widget/player after fallback is shown."""
         try:
             if self.player:
-                self.player.setMedia(QMediaContent())  # unload media
+                # Just delete — don't call setMedia/stop/etc.
                 self.player.deleteLater()
                 self.player = None
             if self.video_widget:
-                self.video_widget.setParent(None)
                 self.video_widget.deleteLater()
                 self.video_widget = None
             log_debug("[AD] Video widget safely cleaned up")
@@ -293,14 +294,11 @@ class AdLoopWidget(QWidget):
         if getattr(self, '_handling_error', False):
             return
         self._handling_error = True
-        log_debug(f"[AD] Media player error {error}: {self.player.errorString()}")
-        try:
-            self.player.error.disconnect(self._on_player_error)
-        except Exception:
-            pass
-        # Do NOT call player.stop() here — it re-enters via DirectShow
-        # at the C++ level causing a stack overflow. Just show fallback.
-        self._show_static_fallback()
+        # Do NOT access player properties (errorString, state, etc.) here —
+        # any call into the player can re-enter DirectShow causing stack overflow.
+        log_debug(f"[AD] Media player error {error}")
+        # Defer fallback to next event loop iteration to let DirectShow unwind
+        QTimer.singleShot(0, self._show_static_fallback)
 
     def set_volume(self, vol):
         self._volume = vol
