@@ -794,13 +794,24 @@ QPushButton:hover {
         if self.ad_overlay:
             self.ad_overlay.set_volume(vol)
 
+    def _screen_size(self):
+        """Return (width, height) from the actual screen geometry.
+
+        self.width()/height() return DPI-scaled values on Windows which
+        don't match the physical display (e.g. 1920 instead of 1080 on a
+        rotated portrait screen).  screen().geometry() always returns the
+        correct post-rotation dimensions.
+        """
+        sg = self.screen().geometry()
+        return sg.width(), sg.height()
+
     def _position_volume_button(self):
         """Position volume button in upper-right of ad area."""
         if not hasattr(self, '_volume_btn') or not self._volume_btn:
             return
-        screen_w = self.width() or 1080
-        ad_height = int((self.height() or 1920) * AD_RATIO)
-        self._volume_btn.move(screen_w - 80, ad_height - 80)
+        sw, sh = self._screen_size()
+        ad_height = int(sh * AD_RATIO)
+        self._volume_btn.move(sw - 80, ad_height - 80)
 
     def _reapply_fullscreen(self):
         screen = self.screen().geometry()
@@ -824,7 +835,8 @@ QPushButton:hover {
 
         # Move secret tap zone to top of game area (below ad)
         if hasattr(self, '_secret_btn'):
-            ad_height = int(self.height() * AD_RATIO)
+            _, sh = self._screen_size()
+            ad_height = int(sh * AD_RATIO)
             self._secret_btn.move(0, ad_height)
             self._secret_btn.raise_()
 
@@ -832,8 +844,7 @@ QPushButton:hover {
         if not self.ad_overlay or not self._multi_root:
             return
 
-        screen_w = self.width()
-        screen_h = self.height()
+        screen_w, screen_h = self._screen_size()
         ad_height = int(screen_h * AD_RATIO)
 
         # Push game content to bottom 40% via top margin
@@ -843,13 +854,13 @@ QPushButton:hover {
         # Position ad overlay over the top 60%
         self.ad_overlay.setGeometry(0, 0, screen_w, ad_height)
         self.ad_overlay.raise_()
-        log_debug(f"[VERT] ad_geometry updated: {screen_w}x{ad_height}")
 
     def _enforce_bottom_layout(self):
         """Re-apply the top margin that pushes game content to bottom 40%."""
         if not self._multi_root or not self._multi_root.layout():
             return
-        ad_height = int(self.height() * AD_RATIO)
+        _, sh = self._screen_size()
+        ad_height = int(sh * AD_RATIO)
         self._multi_root.layout().setContentsMargins(0, ad_height, 0, 0)
 
     # --------------------------------------------------
@@ -1144,7 +1155,7 @@ QPushButton:hover {
             }
         """)
 
-        screen_h = self.height()
+        _, screen_h = self._screen_size()
         game_y = screen_h - int(screen_h * GAME_RATIO)
 
         btn.move(30, game_y + 30)
@@ -1176,7 +1187,8 @@ QPushButton:hover {
             }
         """)
 
-        game_y = self.height() - int(self.height() * GAME_RATIO)
+        _, screen_h = self._screen_size()
+        game_y = screen_h - int(screen_h * GAME_RATIO)
         btn.move(30, game_y + 30)
         btn.raise_()
         btn.show()
