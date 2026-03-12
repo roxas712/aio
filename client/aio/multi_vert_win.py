@@ -1051,6 +1051,12 @@ QPushButton:hover {
         title = game.get("title") or "Unknown"
         log_debug(f"[VERT] Launch requested: {title}")
 
+        # Stop idle timers so they don't return to main while a game is running
+        if hasattr(self, 'grid_idle_timer'):
+            self.grid_idle_timer.stop()
+        if hasattr(self, 'inactivity_timer'):
+            self.inactivity_timer.stop()
+
         try:
             send_status_to_server("in_play")
         except Exception:
@@ -1095,8 +1101,10 @@ QPushButton:hover {
 
         # EXE-based platforms
         if gtype == "exe":
+            log_debug(f"[VERT] Launching EXE: {target}")
             proc = win_launch_game(game)
             if proc:
+                log_debug(f"[VERT] EXE launched, PID={proc.pid}")
                 self._store_game_pid(proc.pid, title)
 
                 if is_full_vertical:
@@ -1109,6 +1117,10 @@ QPushButton:hover {
                         2000,
                         lambda p=proc.pid: self._constrain_landscape_window(p)
                     )
+            else:
+                log_debug(f"[VERT] EXE launch FAILED for {title} (target={target})")
+                # Return to main since game didn't start
+                self.return_to_main()
             return
 
         # URL-based platforms
@@ -1406,6 +1418,10 @@ QPushButton:hover {
                 self.stack.setCurrentWidget(self.main_menu)
             except Exception:
                 pass
+
+        # Restart idle timers
+        if hasattr(self, 'inactivity_timer'):
+            self.inactivity_timer.start()
 
         # Re-enforce bottom layout geometry
         QTimer.singleShot(100, self._enforce_bottom_layout)
