@@ -1111,6 +1111,9 @@ QPushButton:hover {
         if hasattr(self, '_loading_overlay'):
             self._loading_overlay.show_loading("Loading...")
 
+        # Reset constrain phase for new game launch
+        self._constrain_phase = 0
+
         # Snapshot existing windows so we can find new ones after launch
         self._pre_launch_hwnds = set()
         try:
@@ -1279,62 +1282,144 @@ QPushButton:hover {
     # --------------------------------------------------
 
     def _constrain_window(self, hwnd, y_offset, screen_w, game_height):
-        """Break out of fullscreen and position a window into the bottom game region."""
-        title = win32gui.GetWindowText(hwnd)
+        """Break D3D fullscreen and position window into the bottom game region.
 
-        # Log current state
+        Strategy:
+        Phase 1 (first call): Send real Alt+Enter via SendInput to break D3D
+                              exclusive fullscreen, then return to let game process it.
+        Phase 2 (second call): Minimize window to force D3D mode switch if
+                               Alt+Enter didn't work, then return.
+        Phase 3+: Strip styles and reposition into bottom 40%.
+        """
+        title = win32gui.GetWindowText(hwnd)
+        phase = getattr(self, '_constrain_phase', 0)
+
         try:
             rect = win32gui.GetWindowRect(hwnd)
             style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-            ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-            log_debug(f"[VERT] '{title}' BEFORE: rect={rect} style=0x{style:08X} ex=0x{ex_style:08X}")
         except Exception:
-            pass
+            rect = (0, 0, 0, 0)
+            style = 0
 
-        # Step 1: Strip fullscreen style — remove WS_POPUP (fullscreen) and all frame bits
+        log_debug(f"[VERT] _constrain phase={phase} '{title}' rect={rect} style=0x{style:08X}")
+
+        # Phase 1: Send real Alt+Enter via SendInput (OS-level keyboard simulation)
+        if phase == 0:
+            self._constrain_phase = 1
+            log_debug(f"[VERT] Phase 0: Sending Alt+Enter via SendInput")
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                # SendInput structures
+                INPUT_KEYBOARD = 1
+                KEYEVENTF_KEYUP = 0x0002
+                VK_MENU = 0x12    # Alt key
+                VK_RETURN = 0x0D  # Enter key
+
+                class KEYBDINPUT(ctypes.Structure):
+                    _fields_ = [
+                        ("wVk", wintypes.WORD),
+                        ("wScan", wintypes.WORD),
+                        ("dwFlags", wintypes.DWORD),
+                        ("time", wintypes.DWORD),
+                        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+                    ]
+
+                class INPUT(ctypes.Structure):
+                    class _INPUT(ctypes.Union):
+                        _fields_ = [("ki", KEYBDINPUT)]
+                    _fields_ = [
+                        ("type", wintypes.DWORD),
+                        ("_input", _INPUT),
+                    ]
+
+                def make_key_input(vk, flags=0):
+                    inp = INPUT()
+                    inp.type = INPUT_KEYBOARD
+                    inp._input.ki.wVk = vk
+                    inp._input.ki.dwFlags = flags
+                    inp._input.ki.time = 0
+                    inp._input.ki.dwExtraInfo = ctypes.pointer(ctypes.c_ulong(0))
+                    return inp
+
+                # Bring game window to foreground first
+                win32gui.SetForegroundWindow(hwnd)
+
+                # Build input sequence: Alt down, Enter down, Enter up, Alt up
+                inputs = (INPUT * 4)(
+                    make_key_input(VK_MENU),                          # Alt down
+                    make_key_input(VK_RETURN),                        # Enter down
+                    make_key_input(VK_RETURN, KEYEVENTF_KEYUP),       # Enter up
+                    make_key_input(VK_MENU, KEYEVENTF_KEYUP),         # Alt up
+                )
+                ctypes.windll.user32.SendInput(4, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+                log_debug(f"[VERT] SendInput Alt+Enter sent successfully")
+            except Exception as e:
+                log_debug(f"[VERT] SendInput Alt+Enter failed: {e}")
+            return  # Let game process the keystroke
+
+        # Phase 2: If still fullscreen, try minimize+restore to break D3D
+        if phase == 1:
+            self._constrain_phase = 2
+            # Check if Alt+Enter worked (rect should have changed)
+            still_fullscreen = (rect[0] == 0 and rect[1] == 0 and
+                                rect[2] >= screen_w - 10 and rect[3] >= y_offset + game_height)
+            if still_fullscreen:
+                log_debug(f"[VERT] Phase 1: Alt+Enter didn't work, trying minimize+restore")
+                try:
+                    win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                except Exception as e:
+                    log_debug(f"[VERT] Minimize failed: {e}")
+                return  # Let minimize take effect, restore on next call
+            else:
+                log_debug(f"[VERT] Phase 1: Alt+Enter worked! rect={rect}")
+                # Fall through to repositioning
+
+        # Phase 3: Restore from minimize if needed, strip styles, reposition
+        if phase == 2:
+            self._constrain_phase = 3
+            try:
+                # Check if minimized
+                if win32gui.IsIconic(hwnd):
+                    log_debug(f"[VERT] Phase 2: Restoring from minimize")
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    return  # Let restore take effect
+            except Exception:
+                pass
+
+        # Strip window styles for borderless
         try:
             style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-            style &= ~(
+            new_style = style & ~(
                 win32con.WS_POPUP | win32con.WS_CAPTION | win32con.WS_THICKFRAME
                 | win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX
                 | win32con.WS_SYSMENU | win32con.WS_OVERLAPPEDWINDOW
             )
-            style |= win32con.WS_VISIBLE | win32con.WS_CLIPSIBLINGS
-            win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+            new_style |= win32con.WS_VISIBLE | win32con.WS_CLIPSIBLINGS
+            win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, new_style)
         except Exception:
             pass
 
-        # Step 2: Remove TOPMOST and other extended bits
+        # Remove extended style bits
         try:
             ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-            ex_style &= ~(
-                win32con.WS_EX_TOPMOST
-                | win32con.WS_EX_DLGMODALFRAME
-                | win32con.WS_EX_CLIENTEDGE
-                | win32con.WS_EX_STATICEDGE
-            )
+            ex_style &= ~(win32con.WS_EX_TOPMOST | win32con.WS_EX_DLGMODALFRAME
+                          | win32con.WS_EX_CLIENTEDGE | win32con.WS_EX_STATICEDGE)
             win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, ex_style)
         except Exception:
             pass
 
-        # Step 3: Force out of maximized/fullscreen state
-        try:
-            win32gui.ShowWindow(hwnd, win32con.SW_NORMAL)
-        except Exception:
-            pass
-
-        # Step 4: Position using HWND_NOTOPMOST to strip topmost flag
-        HWND_NOTOPMOST = -2
+        # Position into bottom game region
         try:
             win32gui.SetWindowPos(
-                hwnd, HWND_NOTOPMOST,
+                hwnd, win32con.HWND_NOTOPMOST,
                 0, y_offset, screen_w, game_height,
                 win32con.SWP_FRAMECHANGED | win32con.SWP_SHOWWINDOW
             )
         except Exception:
             pass
 
-        # Step 5: Fallback — MoveWindow which some apps respect better
         try:
             win32gui.MoveWindow(hwnd, 0, y_offset, screen_w, game_height, True)
         except Exception:
@@ -1343,8 +1428,7 @@ QPushButton:hover {
         # Verify
         try:
             rect = win32gui.GetWindowRect(hwnd)
-            style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-            log_debug(f"[VERT] '{title}' AFTER: rect={rect} style=0x{style:08X} (target: 0,{y_offset},{screen_w},{y_offset + game_height})")
+            log_debug(f"[VERT] AFTER reposition: rect={rect} (target: 0,{y_offset},{screen_w},{y_offset + game_height})")
         except Exception:
             pass
 
