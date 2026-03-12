@@ -1107,6 +1107,10 @@ QPushButton:hover {
         except Exception:
             pass
 
+        # Hide the game selection UI so it doesn't show behind the game
+        if hasattr(self, 'stack'):
+            self.stack.hide()
+
         # Show loading overlay
         if hasattr(self, '_loading_overlay'):
             self._loading_overlay.show_loading("Loading...")
@@ -1723,6 +1727,7 @@ QPushButton:hover {
         # Restore multi UI inside bottom region
         if hasattr(self, 'stack') and hasattr(self, 'main_menu'):
             try:
+                self.stack.show()
                 self.stack.setCurrentWidget(self.main_menu)
             except Exception:
                 pass
