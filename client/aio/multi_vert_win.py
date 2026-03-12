@@ -1326,6 +1326,16 @@ QPushButton:hover {
         except Exception:
             pass
 
+        # Kill any leftover Chrome using our profile so flags are applied fresh
+        try:
+            subprocess.run(
+                ["taskkill", "/IM", "chrome.exe", "/F"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            import time; time.sleep(0.5)
+        except Exception:
+            pass
+
         # Path to extension that disables the JS Fullscreen API
         nofs_ext = str(Path(__file__).resolve().parent / "chrome_ext_nofs")
 
@@ -1501,51 +1511,76 @@ QPushButton:hover {
                 pass
 
         if is_browser:
-            # --- Browser path: no reparenting ---
-            # Chrome is in --app= mode, already sized to 1080x768 at y=1152.
-            # Just reposition to make sure it's in the right spot, remove
-            # title bar, and show ads + return button normally.
-            log_debug(f"[VERT] Browser game — positioning window (no reparent)")
+            # --- Browser path: reparent to block fullscreen ---
+            # Chrome --app= mode allows JS fullscreen (requestFullscreen).
+            # Reparenting as a child window prevents this at the OS level —
+            # child windows physically cannot go exclusive fullscreen.
+            # Unlike D3D EXE games, Chrome --app= handles input correctly
+            # after reparenting because it doesn't use exclusive rendering.
+            log_debug(f"[VERT] Browser game — reparenting to block fullscreen")
 
             if game_hwnd:
                 try:
-                    # Remove title bar and resize/move borders
+                    our_hwnd = int(self.winId())
+                    log_debug(f"[VERT] Reparenting browser 0x{game_hwnd:08X} "
+                              f"into Qt 0x{our_hwnd:08X}")
+
+                    ctypes.windll.user32.SetParent(game_hwnd, our_hwnd)
+
+                    # Child window style, no frame
                     style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
-                    style &= ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
-                               win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
-                               win32con.WS_MAXIMIZEBOX)
-                    style |= win32con.WS_VISIBLE
+                    style &= ~(win32con.WS_POPUP | win32con.WS_CAPTION |
+                               win32con.WS_THICKFRAME | win32con.WS_SYSMENU |
+                               win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX)
+                    style |= win32con.WS_CHILD | win32con.WS_VISIBLE
                     win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, style)
+
+                    ex_style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_EXSTYLE)
+                    ex_style &= ~(win32con.WS_EX_TOPMOST | win32con.WS_EX_DLGMODALFRAME)
+                    win32gui.SetWindowLong(game_hwnd, win32con.GWL_EXSTYLE, ex_style)
 
                     # Position in bottom 40%
                     win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
-                    log_debug(f"[VERT] Browser window positioned at 0,{ad_height} "
-                              f"size {screen_w}x{game_height}")
-                except Exception as e:
-                    log_debug(f"[VERT] Browser window positioning failed: {e}")
 
-            # Show the regular Qt ad overlay (Chrome isn't fullscreen, so it's visible)
+                    rect = win32gui.GetWindowRect(game_hwnd)
+                    log_debug(f"[VERT] Browser reparented, rect={rect}")
+                except Exception as e:
+                    log_debug(f"[VERT] Browser reparent failed: {e}")
+
+            # Show the regular Qt ad overlay
             if self.ad_overlay:
                 self.ad_overlay.show()
                 self.ad_overlay.raise_()
                 self.ad_overlay.resume()
 
+            # Clean up any previous topmost windows
+            for attr in ('_topmost_ad', '_topmost_return_btn'):
+                w = getattr(self, attr, None)
+                if w:
+                    try:
+                        w.hide()
+                        w.deleteLater()
+                    except Exception:
+                        pass
+                    setattr(self, attr, None)
+
             # Hide loading overlay
             if hasattr(self, '_loading_overlay'):
                 self._loading_overlay.hide_loading()
 
-            # Show return button as TOPMOST (needs to be above Chrome window)
+            # Return button as TOPMOST (child widgets can't render above
+            # reparented Win32 child windows)
             self._show_landscape_return_button_topmost(screen_w, ad_height)
 
             # Install keyboard hook to block Chrome shortcuts
             self._install_keyboard_hook()
 
-            # Keep repositioning browser for a few seconds (it may resize on load)
+            # Keep re-positioning for a few seconds
             self._reparent_count = 0
             self._reparent_params = (game_hwnd, ad_height, screen_w, game_height)
             self._reparent_timer = QTimer(self)
             self._reparent_timer.setInterval(500)
-            self._reparent_timer.timeout.connect(self._reassert_browser_position)
+            self._reparent_timer.timeout.connect(self._reassert_reparent)
             self._reparent_timer.start()
 
         else:
