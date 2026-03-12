@@ -654,14 +654,18 @@ class VerticalMultiWindow(MainWindow):
         _screen = self.screen().geometry()
         _init_w, _init_h = _screen.width(), _screen.height()
 
-        # Push game content (bg_label + stack) to bottom 40% via margin
-        ad_height = int(_init_h * AD_RATIO)
+        # Ad overlay uses physical screen coordinates
+        ad_phys = int(_init_h * AD_RATIO)
+
+        # Layout margin uses the widget's own DPI-scaled coordinate system
+        widget_h = self.height() or _init_h
+        margin_top = int(widget_h * AD_RATIO)
         if self._multi_root.layout():
-            self._multi_root.layout().setContentsMargins(0, ad_height, 0, 0)
+            self._multi_root.layout().setContentsMargins(0, margin_top, 0, 0)
 
         # Create Ad Overlay as child of central widget (covers top 60%)
         self.ad_overlay = AdLoopWidget(self._multi_root)
-        self.ad_overlay.setGeometry(0, 0, _init_w, ad_height)
+        self.ad_overlay.setGeometry(0, 0, _init_w, ad_phys)
         self.ad_overlay.show()
         self.ad_overlay.raise_()
 
@@ -841,8 +845,8 @@ QPushButton:hover {
 
         # Move secret tap zone to top of game area (below ad)
         if hasattr(self, '_secret_btn'):
-            _, sh = self._screen_size()
-            ad_height = int(sh * AD_RATIO)
+            screen_w, screen_h = self._screen_size()
+            ad_height = int(screen_h * AD_RATIO)
             self._secret_btn.move(0, ad_height)
             self._secret_btn.raise_()
 
@@ -850,24 +854,33 @@ QPushButton:hover {
         if not self.ad_overlay or not self._multi_root:
             return
 
+        # Ad overlay uses physical screen pixels (for correct rendering)
         screen_w, screen_h = self._screen_size()
-        ad_height = int(screen_h * AD_RATIO)
-
-        # Push game content to bottom 40% via top margin
-        if self._multi_root.layout():
-            self._multi_root.layout().setContentsMargins(0, ad_height, 0, 0)
-
-        # Position ad overlay over the top 60%
-        self.ad_overlay.setGeometry(0, 0, screen_w, ad_height)
+        ad_phys = int(screen_h * AD_RATIO)
+        self.ad_overlay.setGeometry(0, 0, screen_w, ad_phys)
         self.ad_overlay.raise_()
+
+        # Layout margin uses the widget's own coordinate system (DPI-scaled).
+        # self.height() may be larger than screen_h due to DPI scaling.
+        widget_h = self.height()
+        if widget_h > 0:
+            margin_top = int(widget_h * AD_RATIO)
+        else:
+            margin_top = ad_phys
+        if self._multi_root.layout():
+            self._multi_root.layout().setContentsMargins(0, margin_top, 0, 0)
 
     def _enforce_bottom_layout(self):
         """Re-apply the top margin that pushes game content to bottom 40%."""
         if not self._multi_root or not self._multi_root.layout():
             return
-        _, sh = self._screen_size()
-        ad_height = int(sh * AD_RATIO)
-        self._multi_root.layout().setContentsMargins(0, ad_height, 0, 0)
+        widget_h = self.height()
+        if widget_h > 0:
+            margin_top = int(widget_h * AD_RATIO)
+        else:
+            _, sh = self._screen_size()
+            margin_top = int(sh * AD_RATIO)
+        self._multi_root.layout().setContentsMargins(0, margin_top, 0, 0)
 
     # --------------------------------------------------
     # Admin Menu Override
