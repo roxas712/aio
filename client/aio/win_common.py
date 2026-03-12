@@ -71,6 +71,21 @@ def get_registry_machine_id() -> str:
 
 
 # ------------------------------
+# Version info
+# ------------------------------
+
+def _get_app_version() -> str:
+    """Read app version from version.json, default V1.0.0."""
+    try:
+        if VERSION_FILE.exists():
+            with VERSION_FILE.open("r", encoding="utf-8") as f:
+                return json.load(f).get("version", "V1.0.0")
+    except Exception:
+        pass
+    return "V1.0.0"
+
+
+# ------------------------------
 # Server info
 # ------------------------------
 
@@ -414,6 +429,7 @@ def send_status_to_server(status: str) -> dict:
         payload = {
             "uuid": get_client_uuid(),
             "status": status,
+            "app_version": _get_app_version(),
         }
 
         resp = requests.post(url, json=payload, timeout=3)
