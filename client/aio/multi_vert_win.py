@@ -865,7 +865,7 @@ QPushButton:hover {
             side_size=QSize(240, 340),
             container_size=QSize(1080, 480),
             num_visible=5,
-            gap=-30,
+            gap=-40,
         )
         # Remove internal padding and center the fixed-size card container
         new_carousel.layout().setContentsMargins(0, 0, 0, 0)
