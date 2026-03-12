@@ -706,8 +706,9 @@ class VerticalMultiWindow(MainWindow):
             mm_layout.setContentsMargins(20, 0, 20, 10)
             mm_layout.setSpacing(15)
 
-        # Shrink "Get Started" button for vertical
+        # Shrink "Get Started" button for vertical and re-center it
         if hasattr(self.main_menu, 'start_btn'):
+            mm_layout.setAlignment(self.main_menu.start_btn, Qt.AlignHCenter)
             self.main_menu.start_btn.setFixedSize(260, 55)
             self.main_menu.start_btn.setStyleSheet("""
 QPushButton {
@@ -830,11 +831,11 @@ QPushButton:hover {
             num_visible=5,
             gap=-30,
         )
-        # Remove internal padding so container fills the carousel widget width
+        # Remove internal padding and center the fixed-size card container
         new_carousel.layout().setContentsMargins(0, 0, 0, 0)
+        new_carousel.layout().setAlignment(Qt.AlignCenter)
         self.main_menu.carousel = new_carousel
-        # Insert without alignment constraint so widget fills available width
-        self.main_menu.layout().insertWidget(1, new_carousel)
+        self.main_menu.layout().insertWidget(1, new_carousel, 0, Qt.AlignHCenter)
 
     def _on_volume_changed(self, vol):
         if self.ad_overlay:
