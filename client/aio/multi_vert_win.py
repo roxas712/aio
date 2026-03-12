@@ -1447,8 +1447,10 @@ QPushButton:hover {
         if hasattr(self, '_loading_overlay'):
             self._loading_overlay.hide_loading()
 
-        # Show return button as child of our main window (above the game)
-        self._show_landscape_return_button()
+        # Show return button as a separate TOPMOST window (child widgets can't
+        # render above Win32 child windows like the reparented game)
+        screen_w2, _ = self._screen_size()
+        self._show_landscape_return_button_topmost(screen_w2, ad_height)
 
         # Keep re-positioning the game for a few seconds (it may fight back)
         self._reparent_count = 0
@@ -1490,12 +1492,6 @@ QPushButton:hover {
             # Re-position
             win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
 
-            # Keep game at the bottom of Z-order so Qt widgets stay above
-            win32gui.SetWindowPos(
-                game_hwnd, win32con.HWND_BOTTOM,
-                0, 0, 0, 0,
-                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
-            )
             if self.ad_overlay:
                 self.ad_overlay.raise_()
         except Exception:
@@ -1536,19 +1532,6 @@ QPushButton:hover {
         btn.show()
         btn.clicked.connect(self.return_to_main)
         self._landscape_return_btn = btn
-
-        # Push the GAME to the bottom of the Z-order so all Qt widgets render above it
-        game_hwnd = getattr(self, '_game_hwnd', None)
-        if game_hwnd:
-            try:
-                win32gui.SetWindowPos(
-                    game_hwnd, win32con.HWND_BOTTOM,
-                    0, 0, 0, 0,
-                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
-                )
-                log_debug(f"[VERT] Game pushed to BOTTOM of Z-order")
-            except Exception as e:
-                log_debug(f"[VERT] Game push to bottom failed: {e}")
 
     def _show_landscape_return_button_topmost(self, screen_w, ad_height):
         """Show return button as a separate TOPMOST window over the game."""
