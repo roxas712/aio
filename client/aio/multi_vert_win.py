@@ -707,7 +707,8 @@ class VerticalMultiWindow(MainWindow):
             from PyQt5.QtWidgets import QSpacerItem
             self._ad_spacer = QSpacerItem(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
             mm_layout.insertItem(0, self._ad_spacer)
-            mm_layout.addStretch(1)
+            mm_layout.insertStretch(1, 1)   # top padding in game area
+            mm_layout.addStretch(1)          # bottom padding in game area
             mm_layout.setSpacing(15)
             mm_layout.setContentsMargins(20, 0, extra_right + 20, 10)
 
