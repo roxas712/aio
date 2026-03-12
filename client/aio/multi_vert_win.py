@@ -1521,6 +1521,7 @@ QPushButton:hover {
                 pass
 
         btn = QPushButton("Return to Platform Selection", self)
+        btn.setAttribute(Qt.WA_TranslucentBackground)
         btn.setFixedSize(360, 70)
         btn.setStyleSheet("""
             QPushButton {
@@ -1547,10 +1548,15 @@ QPushButton:hover {
         # Raise button HWND above game HWND (Qt raise doesn't affect Win32 children)
         try:
             btn_hwnd = int(btn.winId())
+            # Make the button's native window transparent (no black background)
+            ex_style = win32gui.GetWindowLong(btn_hwnd, win32con.GWL_EXSTYLE)
+            ex_style |= win32con.WS_EX_TRANSPARENT
+            win32gui.SetWindowLong(btn_hwnd, win32con.GWL_EXSTYLE, ex_style)
             win32gui.SetWindowPos(
                 btn_hwnd, win32con.HWND_TOP,
                 0, 0, 0, 0,
                 win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+                | win32con.SWP_FRAMECHANGED
             )
             log_debug(f"[VERT] Return button raised: hwnd=0x{btn_hwnd:08X}")
         except Exception as e:
@@ -1625,25 +1631,27 @@ QPushButton:hover {
     # --------------------------------------------------
 
     def return_to_main(self):
-        """Vertical-safe return: show returning overlay, kill game, restore UI."""
+        """Vertical-safe return: kill game immediately, show overlay, restore UI after delay."""
         log_debug("[VERT] Return requested")
 
         # Stop reparent timer
         if hasattr(self, '_reparent_timer'):
             self._reparent_timer.stop()
 
-        # Un-reparent the game window before killing (avoids Qt crash)
+        # Un-reparent and hide the game window immediately
         game_hwnd = getattr(self, '_game_hwnd', None)
         if game_hwnd:
             try:
                 if win32gui.IsWindow(game_hwnd):
                     ctypes.windll.user32.SetParent(game_hwnd, 0)
+                    win32gui.ShowWindow(game_hwnd, win32con.SW_HIDE)
             except Exception:
                 pass
         self._game_hwnd = None
 
-        # Remove topmost overlays if any
-        for attr in ("_topmost_return_btn", "_topmost_ad"):
+        # Remove return buttons immediately
+        for attr in ("_vertical_return_btn", "_landscape_return_btn",
+                      "_topmost_return_btn", "_topmost_ad"):
             try:
                 w = getattr(self, attr, None)
                 if w:
@@ -1653,34 +1661,20 @@ QPushButton:hover {
             except Exception:
                 pass
 
-        # Remove in-app return buttons
-        for attr in ("_vertical_return_btn", "_landscape_return_btn"):
-            try:
-                btn = getattr(self, attr, None)
-                if btn:
-                    btn.deleteLater()
-            except Exception:
-                pass
+        # Kill game processes immediately (so game doesn't re-appear)
+        self._kill_game_processes()
 
-        # Show "Returning To Menu..." overlay (raise above reparented game)
+        # Show "Returning To Menu..." overlay (game is gone, overlay is visible)
         if hasattr(self, '_loading_overlay'):
             self._loading_overlay.show_loading("Returning To Menu...")
-            try:
-                overlay_hwnd = int(self._loading_overlay.winId())
-                win32gui.SetWindowPos(
-                    overlay_hwnd, win32con.HWND_TOP,
-                    0, 0, 0, 0,
-                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
-                )
-            except Exception:
-                pass
+            self._loading_overlay.raise_()
 
-        # Do the actual cleanup after a short delay so the overlay is visible
-        QTimer.singleShot(200, self._finish_return_to_main)
+        # Restore UI after a visible delay
+        QTimer.singleShot(1500, self._finish_return_to_main)
 
-    def _finish_return_to_main(self):
-        """Perform the actual cleanup after the returning overlay is shown."""
-        # Kill game process by PID
+    def _kill_game_processes(self):
+        """Kill all game-related processes."""
+        # Kill by launcher PID
         try:
             if GAME_PID_FILE.exists():
                 pid = GAME_PID_FILE.read_text().strip()
@@ -1695,7 +1689,7 @@ QPushButton:hover {
         except Exception:
             pass
 
-        # Kill by the actual game window PID (may differ from launcher PID)
+        # Kill by the actual game window PID
         game_win_pid = getattr(self, '_game_window_pid', None)
         if game_win_pid:
             try:
@@ -1709,7 +1703,7 @@ QPushButton:hover {
                 pass
             self._game_window_pid = None
 
-        # Also kill by exe name (handles launcher-spawned processes)
+        # Kill by exe name
         exe_name = getattr(self, '_game_exe_name', None)
         if exe_name:
             try:
@@ -1725,6 +1719,8 @@ QPushButton:hover {
 
         self._game_pid = None
 
+    def _finish_return_to_main(self):
+        """Restore UI after the returning overlay has been visible."""
         # Restore ads
         if self.ad_overlay:
             self.ad_overlay.show()
