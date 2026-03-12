@@ -1370,7 +1370,27 @@ QPushButton:hover {
             self._show_landscape_return_button()
 
     def _raise_overlays_over_game(self, screen_w, ad_height):
-        """Raise ad overlay and return button as TOPMOST windows over the game."""
+        """Raise ad overlay and return button as TOPMOST windows over the game.
+
+        Critical step: steal focus from the game FIRST to break D3D exclusive
+        fullscreen. Once the game loses focus, DWM compositing resumes and
+        our TOPMOST windows can render on top of the game.
+        """
+        game_hwnd = getattr(self, '_game_hwnd', None)
+
+        # Step 1: Steal focus from the game to break D3D exclusive fullscreen
+        if game_hwnd:
+            try:
+                # Bring our Qt main window to the foreground
+                our_hwnd = int(self.winId())
+                log_debug(f"[VERT] Stealing focus from game 0x{game_hwnd:08X} to Qt 0x{our_hwnd:08X}")
+
+                # Use AllowSetForegroundWindow + SetForegroundWindow
+                ctypes.windll.user32.AllowSetForegroundWindow(os.getpid())
+                win32gui.SetForegroundWindow(our_hwnd)
+            except Exception as e:
+                log_debug(f"[VERT] Focus steal failed: {e}")
+
         # Create a separate top-level ad overlay window that floats above the game
         if hasattr(self, '_topmost_ad') and self._topmost_ad:
             try:
@@ -1406,6 +1426,18 @@ QPushButton:hover {
         # Force TOPMOST via Win32 API
         self._make_overlay_topmost(topmost_ad)
 
+        # Also make the game window NOT topmost so it stays behind
+        if game_hwnd:
+            try:
+                win32gui.SetWindowPos(
+                    game_hwnd, win32con.HWND_NOTOPMOST,
+                    0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+                )
+                log_debug(f"[VERT] Set game to NOTOPMOST")
+            except Exception:
+                pass
+
         # Hide the in-app ad overlay (it's behind the game anyway)
         if self.ad_overlay:
             self.ad_overlay.pause()
@@ -1418,19 +1450,40 @@ QPushButton:hover {
         # Show return button as a separate topmost window too
         self._show_landscape_return_button_topmost(screen_w, ad_height)
 
-        # Periodically re-assert TOPMOST in case the game fights for focus
+        # Periodically re-assert TOPMOST and keep game behind
         self._topmost_count = 0
         self._topmost_timer = QTimer(self)
-        self._topmost_timer.setInterval(1000)
+        self._topmost_timer.setInterval(500)
         self._topmost_timer.timeout.connect(self._reassert_topmost)
         self._topmost_timer.start()
 
     def _reassert_topmost(self):
-        """Periodically re-assert TOPMOST on our overlays."""
+        """Periodically re-assert TOPMOST on our overlays and push game behind."""
         self._topmost_count += 1
-        if self._topmost_count > 30:  # Stop after 30 seconds
+        if self._topmost_count > 60:  # Stop after 30 seconds (60 * 500ms)
             self._topmost_timer.stop()
             return
+
+        game_hwnd = getattr(self, '_game_hwnd', None)
+
+        # Re-steal focus if the game took it back
+        if game_hwnd:
+            try:
+                fg = win32gui.GetForegroundWindow()
+                if fg == game_hwnd:
+                    log_debug(f"[VERT] Game reclaimed focus, stealing back")
+                    our_hwnd = int(self.winId())
+                    ctypes.windll.user32.AllowSetForegroundWindow(os.getpid())
+                    win32gui.SetForegroundWindow(our_hwnd)
+                    # Push game behind
+                    win32gui.SetWindowPos(
+                        game_hwnd, win32con.HWND_NOTOPMOST,
+                        0, 0, 0, 0,
+                        win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+                    )
+            except Exception:
+                pass
+
         if hasattr(self, '_topmost_ad') and self._topmost_ad:
             self._make_overlay_topmost(self._topmost_ad)
         if hasattr(self, '_topmost_return_btn') and self._topmost_return_btn:
