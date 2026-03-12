@@ -67,6 +67,41 @@ GAME_RATIO = 0.40
 
 
 # ------------------------------------------------------
+# Loading Overlay
+# ------------------------------------------------------
+
+class LoadingOverlay(QWidget):
+    """Dark overlay with centered text for loading/returning transitions."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setStyleSheet("background-color: rgba(0, 0, 0, 220);")
+        self.hide()
+
+        self._label = QLabel("Loading...", self)
+        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setStyleSheet("""
+            color: white;
+            font-size: 36px;
+            font-weight: bold;
+            background: transparent;
+        """)
+
+    def resizeEvent(self, event):
+        self._label.setGeometry(self.rect())
+        super().resizeEvent(event)
+
+    def show_loading(self, text="Loading..."):
+        self._label.setText(text)
+        self.raise_()
+        self.show()
+
+    def hide_loading(self):
+        self.hide()
+
+
+# ------------------------------------------------------
 # Volume Button (ported from V1.17 vert.py)
 # ------------------------------------------------------
 
@@ -794,6 +829,14 @@ QPushButton:hover {
         except Exception:
             pass
 
+        # Loading overlay for game launch/return transitions
+        screen_w, screen_h = self._screen_size()
+        game_height = int(screen_h * GAME_RATIO)
+        self._loading_overlay = LoadingOverlay(self)
+        self._loading_overlay.setFixedSize(screen_w, game_height)
+        self._loading_overlay.move(0, screen_h - game_height)
+        self._loading_overlay.hide()
+
         log_debug(f"[VERT] __init__ complete. games={len(self.games) if self.games else 0}, "
                   f"has_carousel={hasattr(self.main_menu, 'carousel')}")
 
@@ -1062,12 +1105,9 @@ QPushButton:hover {
         except Exception:
             pass
 
-        # Show internal loading screen
-        if hasattr(self, 'stack') and hasattr(self, 'loading_screen'):
-            try:
-                self.stack.setCurrentWidget(self.loading_screen)
-            except Exception:
-                pass
+        # Show loading overlay
+        if hasattr(self, '_loading_overlay'):
+            self._loading_overlay.show_loading("Loading...")
 
         QTimer.singleShot(1500, lambda g=game: self._vertical_launch_after_delay(g))
 
@@ -1126,6 +1166,8 @@ QPushButton:hover {
                 if is_full_vertical:
                     if self.ad_overlay:
                         self.ad_overlay.hide()
+                    if hasattr(self, '_loading_overlay'):
+                        self._loading_overlay.hide_loading()
                     self._show_fullscreen_return_button()
                 else:
                     # Constrain landscape EXE to bottom 40%
@@ -1325,6 +1367,9 @@ QPushButton:hover {
             pass
 
         if found:
+            # Game window found — hide loading, show return button
+            if hasattr(self, '_loading_overlay'):
+                self._loading_overlay.hide_loading()
             self._show_landscape_return_button()
         elif retries > 0:
             QTimer.singleShot(
@@ -1334,6 +1379,9 @@ QPushButton:hover {
         else:
             log_debug(f"[VERT] Failed to find window for PID {pid} (exe={exe_name}) after all retries")
             log_debug(f"[VERT] Searched PIDs: {pids}")
+            # Hide loading even if window wasn't found — show return button so user isn't stuck
+            if hasattr(self, '_loading_overlay'):
+                self._loading_overlay.hide_loading()
             self._show_landscape_return_button()
 
     # --------------------------------------------------
@@ -1408,10 +1456,10 @@ QPushButton:hover {
     # --------------------------------------------------
 
     def return_to_main(self):
-        """Vertical-safe return: kill running platform and restore bottom UI."""
+        """Vertical-safe return: show returning overlay, kill game, restore UI."""
         log_debug("[VERT] Return requested")
 
-        # Remove return buttons
+        # Remove return buttons immediately
         for attr in ("_vertical_return_btn", "_landscape_return_btn"):
             try:
                 btn = getattr(self, attr, None)
@@ -1420,6 +1468,15 @@ QPushButton:hover {
             except Exception:
                 pass
 
+        # Show "Returning To Menu..." overlay
+        if hasattr(self, '_loading_overlay'):
+            self._loading_overlay.show_loading("Returning To Menu...")
+
+        # Do the actual cleanup after a short delay so the overlay is visible
+        QTimer.singleShot(200, self._finish_return_to_main)
+
+    def _finish_return_to_main(self):
+        """Perform the actual cleanup after the returning overlay is shown."""
         # Kill game process by PID
         try:
             if GAME_PID_FILE.exists():
@@ -1472,8 +1529,13 @@ QPushButton:hover {
         if hasattr(self, 'inactivity_timer'):
             self.inactivity_timer.start()
 
-        # Re-enforce bottom layout geometry
+        # Re-enforce bottom layout, then hide the overlay
         QTimer.singleShot(100, self._enforce_bottom_layout)
+        QTimer.singleShot(500, self._hide_loading_overlay)
+
+    def _hide_loading_overlay(self):
+        if hasattr(self, '_loading_overlay'):
+            self._loading_overlay.hide_loading()
 
 
 # ------------------------------------------------------
