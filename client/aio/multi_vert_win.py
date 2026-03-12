@@ -691,6 +691,11 @@ class VerticalMultiWindow(MainWindow):
         # Push game content into the bottom 40% of the screen.
         # MainMenu fills the full window.  We replace the top stretch with a
         # fixed-height spacer equal to the ad area so content sits just below it.
+        #
+        # The window's logical width may exceed the physical screen width due
+        # to DPI scaling (e.g. logical=1920, physical=1080).  Pad the right
+        # margin so Qt layouts center content within the visible area only.
+        extra_right = max(0, self.width() - _init_w)
         mm_layout = self.main_menu.layout()
         if mm_layout:
             # Remove all existing stretch items
@@ -703,8 +708,8 @@ class VerticalMultiWindow(MainWindow):
             self._ad_spacer = QSpacerItem(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
             mm_layout.insertItem(0, self._ad_spacer)
             mm_layout.addStretch(1)
-            mm_layout.setContentsMargins(20, 0, 20, 10)
             mm_layout.setSpacing(15)
+            mm_layout.setContentsMargins(20, 0, extra_right + 20, 10)
 
         # Shrink "Get Started" button for vertical and re-center it
         if hasattr(self.main_menu, 'start_btn'):
@@ -723,11 +728,11 @@ QPushButton:hover {
 }
 """)
 
-        # Tighten grid menu margins for vertical
+        # Tighten grid menu margins for vertical (same DPI right-margin fix)
         if hasattr(self, 'grid_menu'):
             grid_layout = self.grid_menu.layout()
             if grid_layout:
-                grid_layout.setContentsMargins(20, 20, 20, 20)
+                grid_layout.setContentsMargins(20, 20, extra_right + 20, 20)
                 grid_layout.setSpacing(15)
 
         # Enforce layout whenever stacked content changes
@@ -745,7 +750,8 @@ QPushButton:hover {
             mm = self.main_menu
             c = getattr(mm, 'carousel', None)
             b = getattr(mm, 'start_btn', None)
-            log_debug(f"[DIAG] window={self.width()}x{self.height()}")
+            sw, sh = self._screen_size()
+            log_debug(f"[DIAG] window={self.width()}x{self.height()} screen={sw}x{sh} extra_right={max(0, self.width()-sw)}")
             log_debug(f"[DIAG] stack vis={self.stack.isVisible()} geo={self.stack.geometry()}")
             log_debug(f"[DIAG] mainmenu vis={mm.isVisible()} geo={mm.geometry()}")
             if c:
@@ -768,6 +774,7 @@ QPushButton:hover {
                         sp = it.spacerItem()
                         items.append(f"S:{sp.sizeHint()}")
                 log_debug(f"[DIAG] mm_layout items={items}")
+                log_debug(f"[DIAG] mm_margins={ml.contentsMargins().left()},{ml.contentsMargins().top()},{ml.contentsMargins().right()},{ml.contentsMargins().bottom()}")
         QTimer.singleShot(2000, _diag)
 
     def _apply_new_games(self, new_games: list):
@@ -800,7 +807,9 @@ QPushButton:hover {
         if hasattr(self, 'grid_menu'):
             grid_layout = self.grid_menu.layout()
             if grid_layout:
-                grid_layout.setContentsMargins(20, 20, 20, 20)
+                screen_w, _ = self._screen_size()
+                extra_r = max(0, self.width() - screen_w)
+                grid_layout.setContentsMargins(20, 20, extra_r + 20, 20)
                 grid_layout.setSpacing(15)
 
     def closeEvent(self, event):
@@ -902,6 +911,13 @@ QPushButton:hover {
             self._ad_spacer.changeSize(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
             if self.main_menu.layout():
                 self.main_menu.layout().invalidate()
+
+        # Re-adjust right margin for DPI scaling mismatch
+        extra_right = max(0, (self.width() or 0) - screen_w)
+        if hasattr(self, 'main_menu') and self.main_menu.layout():
+            self.main_menu.layout().setContentsMargins(20, 0, extra_right + 20, 10)
+        if hasattr(self, 'grid_menu') and self.grid_menu.layout():
+            self.grid_menu.layout().setContentsMargins(20, 20, extra_right + 20, 20)
 
     def _enforce_bottom_layout(self):
         """Re-apply the ad spacer height in case it drifted."""
