@@ -43,7 +43,7 @@ from PyQt5.QtCore import Qt, QTimer, QSize
 from PyQt5.QtGui import QIcon, QImage, QPainter, QColor, QPixmap
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QApplication, QSizePolicy,
+    QApplication, QSizePolicy, QSpacerItem,
 )
 
 import ctypes
@@ -360,8 +360,17 @@ class VerticalManagerPage(QWidget):
             self.setStyleSheet("background-color: #1a1a2e;")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setContentsMargins(20, 0, 20, 15)
         layout.setSpacing(8)
+
+        # Spacer to push content below the ad overlay area
+        win = parent if parent else self.window()
+        if hasattr(win, '_screen_size'):
+            _sw, _sh = win._screen_size()
+        else:
+            _sh = 1920
+        ad_h = int(_sh * AD_RATIO)
+        layout.addSpacerItem(QSpacerItem(0, ad_h, QSizePolicy.Minimum, QSizePolicy.Fixed))
 
         # Title
         title = QLabel("Manager", self)
@@ -606,6 +615,11 @@ class VerticalManagerPage(QWidget):
     def _return_to_menu(self):
         win = self.window()
         if hasattr(win, 'stack') and hasattr(win, 'main_menu'):
+            # Resume ad loop
+            if hasattr(win, 'ad_overlay') and win.ad_overlay:
+                win.ad_overlay._label.setText("")
+                win.ad_overlay._label.setStyleSheet("")
+                win.ad_overlay.resume()
             win.stack.setCurrentWidget(win.main_menu)
             if hasattr(win, '_sync_tap_zone_visibility'):
                 win._sync_tap_zone_visibility()
@@ -709,7 +723,7 @@ class VerticalMultiWindow(MainWindow):
                 if item and item.spacerItem():
                     mm_layout.removeItem(item)
             # Fixed spacer matching the ad area height
-            from PyQt5.QtWidgets import QSpacerItem
+
             self._ad_spacer = QSpacerItem(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
             mm_layout.insertItem(0, self._ad_spacer)
             mm_layout.insertStretch(1, 1)   # top padding in game area
@@ -740,7 +754,7 @@ QPushButton:hover {
             if grid_layout:
                 grid_layout.setContentsMargins(20, 0, 20, 20)
                 grid_layout.setSpacing(15)
-                from PyQt5.QtWidgets import QSpacerItem
+    
                 self._grid_ad_spacer = QSpacerItem(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
                 grid_layout.insertItem(0, self._grid_ad_spacer)
 
@@ -819,7 +833,7 @@ QPushButton:hover {
                 grid_layout.setContentsMargins(20, 0, 20, 20)
                 grid_layout.setSpacing(15)
                 # Add ad spacer so game grid sits below the ad overlay
-                from PyQt5.QtWidgets import QSpacerItem
+    
                 screen_w, screen_h = self._screen_size()
                 ad_phys = int(screen_h * AD_RATIO)
                 self._grid_ad_spacer = QSpacerItem(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
@@ -963,6 +977,16 @@ QPushButton:hover {
             self.stack.removeWidget(self.manager_page)
             self.manager_page.deleteLater()
             self.manager_page = None
+
+        # Pause ad loop and show placeholder
+        if self.ad_overlay:
+            self.ad_overlay.pause()
+            self.ad_overlay._label.clear()  # remove video/image pixmap
+            self.ad_overlay._label.setText("Ad Space")
+            self.ad_overlay._label.setAlignment(Qt.AlignCenter)
+            self.ad_overlay._label.setStyleSheet(
+                "color: white; font-size: 36px; font-weight: bold; background-color: black;"
+            )
 
         self.manager_page = VerticalManagerPage(self, advanced=advanced)
         self.stack.addWidget(self.manager_page)
