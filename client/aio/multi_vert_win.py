@@ -1885,7 +1885,7 @@ QPushButton:hover {
     # --------------------------------------------------
 
     def _show_titlebar_cover(self, screen_w, ad_height):
-        """Place a TOPMOST black strip over Chrome's title bar area."""
+        """Place a TOPMOST click-through black strip over Chrome's title bar."""
         old = getattr(self, '_titlebar_cover', None)
         if old:
             try:
@@ -1896,6 +1896,7 @@ QPushButton:hover {
         TITLEBAR_H = 32  # Chrome title bar height in pixels
 
         cover = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        cover.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         cover.setAutoFillBackground(True)
         pal = cover.palette()
         pal.setColor(cover.backgroundRole(), QColor(0, 0, 0))
@@ -1903,7 +1904,17 @@ QPushButton:hover {
         cover.setGeometry(0, ad_height, screen_w, TITLEBAR_H)
         cover.show()
         self._titlebar_cover = cover
-        self._make_overlay_topmost(cover)
+
+        # Make TOPMOST + click-through (WS_EX_TRANSPARENT | WS_EX_LAYERED)
+        hwnd = int(cover.winId())
+        win32gui.SetWindowPos(
+            hwnd, win32con.HWND_TOPMOST,
+            0, 0, 0, 0,
+            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+        )
+        ex = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+        ex |= win32con.WS_EX_TRANSPARENT | win32con.WS_EX_LAYERED | 0x08000000  # WS_EX_NOACTIVATE
+        win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, ex)
 
     # --------------------------------------------------
     # Return Buttons
