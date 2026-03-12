@@ -631,14 +631,19 @@ class BlurImageButton(QWidget):
         painter.setClipPath(clip_path)
 
         # Dark background fill so no empty space shows around fitted logos
+        painter.save()
         painter.setBrush(QColor(15, 10, 30))
         painter.setPen(Qt.NoPen)
         painter.drawRoundedRect(inner_rect, radius, radius)
+        painter.restore()
 
         if not self._pixmap.isNull():
+            target_size = QSize(
+                max(1, int(inner_rect.width())),
+                max(1, int(inner_rect.height()))
+            )
             scaled = self._pixmap.scaled(
-                int(inner_rect.width()),
-                int(inner_rect.height()),
+                target_size,
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
             )
