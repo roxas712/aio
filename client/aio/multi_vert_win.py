@@ -734,12 +734,15 @@ QPushButton:hover {
 }
 """)
 
-        # Tighten grid menu margins for vertical
+        # Grid menu also needs an ad spacer to push content below the ad area
         if hasattr(self, 'grid_menu'):
             grid_layout = self.grid_menu.layout()
             if grid_layout:
-                grid_layout.setContentsMargins(20, 20, 20, 20)
+                grid_layout.setContentsMargins(20, 0, 20, 20)
                 grid_layout.setSpacing(15)
+                from PyQt5.QtWidgets import QSpacerItem
+                self._grid_ad_spacer = QSpacerItem(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
+                grid_layout.insertItem(0, self._grid_ad_spacer)
 
         # Enforce layout whenever stacked content changes
         try:
@@ -813,8 +816,14 @@ QPushButton:hover {
         if hasattr(self, 'grid_menu'):
             grid_layout = self.grid_menu.layout()
             if grid_layout:
-                grid_layout.setContentsMargins(20, 20, 20, 20)
+                grid_layout.setContentsMargins(20, 0, 20, 20)
                 grid_layout.setSpacing(15)
+                # Add ad spacer so game grid sits below the ad overlay
+                from PyQt5.QtWidgets import QSpacerItem
+                screen_w, screen_h = self._screen_size()
+                ad_phys = int(screen_h * AD_RATIO)
+                self._grid_ad_spacer = QSpacerItem(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
+                grid_layout.insertItem(0, self._grid_ad_spacer)
 
     def closeEvent(self, event):
         """Block unexpected window closure. Exit only via explicit app.quit()."""
@@ -926,11 +935,15 @@ QPushButton:hover {
         self.ad_overlay.setGeometry(0, 0, screen_w, ad_phys)
         self.ad_overlay.raise_()
 
-        # Update the fixed spacer in MainMenu to match ad height
+        # Update the fixed spacers in MainMenu and GridMenu to match ad height
         if hasattr(self, '_ad_spacer'):
             self._ad_spacer.changeSize(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
             if self.main_menu.layout():
                 self.main_menu.layout().invalidate()
+        if hasattr(self, '_grid_ad_spacer'):
+            self._grid_ad_spacer.changeSize(0, ad_phys, QSizePolicy.Minimum, QSizePolicy.Fixed)
+            if hasattr(self, 'grid_menu') and self.grid_menu.layout():
+                self.grid_menu.layout().invalidate()
 
         # Re-constrain stack to physical screen; bg covers game area only
         self.stack.setFixedSize(screen_w, screen_h)
