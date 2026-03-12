@@ -781,7 +781,12 @@ def sync_config_from_server() -> Dict[str, Any]:
                 current = load_games()
                 current_titles = sorted((g.get("title") or "").lower() for g in current)
                 new_titles = sorted((g.get("title") or "").lower() for g in filtered)
-                result["changed_games"] = (current_titles != new_titles)
+                # Also compare targets so stale URLs on disk get refreshed
+                current_targets = sorted((g.get("target") or "") for g in current)
+                new_targets = sorted((g.get("target") or "") for g in filtered)
+                result["changed_games"] = (
+                    current_titles != new_titles or current_targets != new_targets
+                )
 
     elif tt == "single":
         sg = cfg.get("selected_game") or {}
