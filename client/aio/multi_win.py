@@ -597,7 +597,9 @@ class BlurImageButton(QWidget):
         super().leaveEvent(event)
 
     def resizeEvent(self, event):
-        self.label.setGeometry(self.rect())
+        # Inset label so long names word-wrap inside the button
+        pad = 10
+        self.label.setGeometry(pad, pad, self.width() - pad * 2, self.height() - pad * 2)
         super().resizeEvent(event)
 
     def sizeHint(self):
