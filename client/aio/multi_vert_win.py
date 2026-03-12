@@ -39,14 +39,12 @@ import win32gui
 import win32con
 import win32process
 
-from PyQt5.QtCore import Qt, QTimer, QSize, QUrl
-from PyQt5.QtGui import QIcon, QPainter, QColor, QPixmap
+from PyQt5.QtCore import Qt, QTimer, QSize
+from PyQt5.QtGui import QIcon, QImage, QPainter, QColor, QPixmap
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QApplication, QSizePolicy,
 )
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaPlaylist, QMediaContent
-from PyQt5.QtMultimediaWidgets import QVideoWidget
 
 import ctypes
 
@@ -140,178 +138,185 @@ class VolumeButton(QPushButton):
 # ------------------------------------------------------
 
 class AdLoopWidget(QWidget):
+    """Ad loop widget for the top 60% of vertical display.
+
+    Plays .mp4 videos via OpenCV (FFmpeg backend — no DirectShow) and
+    also supports .jpg/.png/.bmp image ads. Videos loop continuously;
+    multiple media files rotate in sequence.
+    Falls back to branded image if no ads are found or cv2 is unavailable.
+    """
+
+    IMAGE_SLIDE_MS = 8000  # 8 seconds per image slide
+
     def __init__(self, parent=None):
         super().__init__(parent)
-
         self.setStyleSheet("background-color: black;")
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
 
-        # Video player is created lazily — only when we have videos to play.
-        # This avoids DirectShow/Mesa crashes on VMs with no audio/video hardware.
-        self.video_widget = None
-        self.player = None
-        self.playlist = None
-        self._fallback_label = None
+        self._label = QLabel(self)
+        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setScaledContents(True)
+        self._layout.addWidget(self._label)
+
+        self._media_files = []   # list of Paths (.mp4, .jpg, etc.)
+        self._current_idx = 0
+        self._cap = None         # cv2.VideoCapture (or None)
+        self._frame_timer = QTimer(self)
+        self._frame_timer.timeout.connect(self._read_frame)
+        self._slide_timer = QTimer(self)
+        self._slide_timer.timeout.connect(self._next_media)
         self._volume = 100
+        self._paused = False
+        self._cv2 = None  # lazy import
 
-    def _init_player(self):
-        """Create the video player on demand. Returns True on success."""
-        if self.player is not None:
+    def _try_import_cv2(self):
+        if self._cv2 is not None:
             return True
-
-        # Pre-flight: check for audio hardware via Win32 API.
-        # DirectShow crashes with a C++ stack overflow if no audio device exists.
         try:
-            num_audio = ctypes.windll.winmm.waveOutGetNumDevs()
-            if num_audio == 0:
-                log_debug("[AD] No audio output devices detected, skipping video player")
-                return False
-        except Exception:
-            pass
-
-        try:
-            self.video_widget = QVideoWidget(self)
-            self._layout.addWidget(self.video_widget)
-
-            self.player = QMediaPlayer(self)
-            self.playlist = QMediaPlaylist(self)
-            self.player.setVideoOutput(self.video_widget)
-            self.player.setPlaylist(self.playlist)
-            self.playlist.setPlaybackMode(QMediaPlaylist.Loop)
-            self.player.setVolume(self._volume)
-            self.player.error.connect(self._on_player_error)
+            import cv2
+            self._cv2 = cv2
+            log_debug("[AD] OpenCV loaded successfully")
             return True
-        except Exception as e:
-            log_debug(f"[AD] Failed to init video player: {e}")
+        except ImportError:
+            log_debug("[AD] OpenCV (cv2) not available — video playback disabled")
             return False
 
     def load_ads(self, folder_path: Path):
-        # Create folder if missing
         folder_path.mkdir(parents=True, exist_ok=True)
 
-        # Seed the ads folder with the default loop if empty
-        if not list(folder_path.glob("*.mp4")):
+        has_cv2 = self._try_import_cv2()
+
+        # Seed ads folder with default video if empty
+        if has_cv2 and not list(folder_path.glob("*.mp4")):
             default_vid = AIO_ROOT / "kiosk" / "vids" / "AIO_upper-loop.mp4"
             if default_vid.exists():
                 try:
                     import shutil
                     shutil.copy2(str(default_vid), str(folder_path / default_vid.name))
-                    log_debug(f"[AD] Copied default ad loop to ads folder")
+                    log_debug("[AD] Copied default ad loop to ads folder")
                 except Exception as e:
                     log_debug(f"[AD] Failed to copy default ad: {e}")
 
-        # Play videos from the ads folder (safe ProgramData path)
-        videos = list(sorted(folder_path.glob("*.mp4")))
+        # Collect media files
+        media = []
+        for ext in ("*.jpg", "*.jpeg", "*.png", "*.bmp"):
+            media.extend(folder_path.glob(ext))
+        if has_cv2:
+            media.extend(folder_path.glob("*.mp4"))
+        media = list(sorted(media))
 
-        if videos:
-            # Store paths and defer ALL player creation + playback to after event loop
-            self._pending_videos = videos
-            log_debug(f"[AD] {len(videos)} video(s) found, deferring player init")
-            QTimer.singleShot(1000, self._deferred_init_and_play)
+        if media:
+            self._media_files = media
+            self._current_idx = 0
+            log_debug(f"[AD] {len(media)} ad(s) found ({sum(1 for m in media if m.suffix == '.mp4')} video)")
+            self._play_current()
         else:
-            log_debug("[AD] No videos found, showing static fallback")
-            self._show_static_fallback()
+            log_debug("[AD] No ads found, showing branded fallback")
+            self._show_branded_fallback()
 
-    def _deferred_init_and_play(self):
-        """Create video player and start playback after event loop is running."""
-        videos = getattr(self, '_pending_videos', None)
-        if not videos:
-            self._show_static_fallback()
+    def _play_current(self):
+        """Start playing the current media item."""
+        self._frame_timer.stop()
+        self._slide_timer.stop()
+        if self._cap is not None:
+            self._cap.release()
+            self._cap = None
+
+        path = self._media_files[self._current_idx]
+
+        if path.suffix.lower() == ".mp4":
+            self._play_video(path)
+        else:
+            self._show_image(path)
+
+    def _play_video(self, path: Path):
+        """Open video with OpenCV and start frame timer."""
+        cv2 = self._cv2
+        cap = cv2.VideoCapture(str(path))
+        if not cap.isOpened():
+            log_debug(f"[AD] Failed to open video: {path.name}")
+            self._next_media()
             return
 
-        if not self._init_player():
-            self._show_static_fallback()
+        self._cap = cap
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        self._frame_timer.start(int(1000 / fps))
+        log_debug(f"[AD] Playing video: {path.name} ({fps:.0f} fps)")
+
+    def _read_frame(self):
+        """Read one frame from the video and display it."""
+        if self._cap is None or self._paused:
             return
 
-        log_debug("[AD] Player initialized, starting playback")
-        self.playlist.clear()
-        for v in videos:
-            self.playlist.addMedia(QMediaContent(QUrl.fromLocalFile(str(v))))
-        try:
-            self.player.play()
-        except Exception as e:
-            log_debug(f"[AD] Playback failed: {e}")
-            self._show_static_fallback()
+        ret, frame = self._cap.read()
+        if not ret:
+            # Video ended — loop or advance to next media
+            self._cap.set(self._cv2.CAP_PROP_POS_FRAMES, 0)
+            if len(self._media_files) > 1:
+                self._next_media()
+            else:
+                # Single video — loop it
+                ret, frame = self._cap.read()
+                if not ret:
+                    return
 
-    def _show_static_fallback(self):
-        """Show branded image when no videos are available or playback fails."""
-        if self._fallback_label:
-            return  # Already showing fallback
+        if ret:
+            h, w, ch = frame.shape
+            rgb = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
+            qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+            self._label.setPixmap(QPixmap.fromImage(qimg))
 
-        # Do NOT touch the player or video_widget in ANY way here.
-        # Any call (stop, hide, setMuted, setMedia, setVolume) re-enters
-        # DirectShow at the C++ level causing a fatal stack overflow.
-        # Just disconnect the Python signal and layer fallback on top.
-        if self.player:
-            try:
-                self.player.error.disconnect(self._on_player_error)
-            except Exception:
-                pass
+    def _show_image(self, path: Path):
+        """Display a static image ad."""
+        pix = QPixmap(str(path).replace("\\", "/"))
+        if pix.isNull():
+            log_debug(f"[AD] Failed to load image: {path.name}")
+            self._next_media()
+            return
+        self._label.setPixmap(pix)
+        # Auto-advance after interval if there are multiple media files
+        if len(self._media_files) > 1:
+            self._slide_timer.start(self.IMAGE_SLIDE_MS)
 
-        self._fallback_label = QLabel(self)
-        self._fallback_label.setAlignment(Qt.AlignCenter)
+    def _next_media(self):
+        """Advance to the next media file in rotation."""
+        if not self._media_files:
+            return
+        self._current_idx = (self._current_idx + 1) % len(self._media_files)
+        self._play_current()
 
+    def _show_branded_fallback(self):
+        """Show admin_bg.jpg or gold text when no ads are available."""
         logo_path = AIO_ROOT / "kiosk" / "img" / "admin_bg.jpg"
         if logo_path.exists():
             pix = QPixmap(str(logo_path).replace("\\", "/"))
-            self._fallback_label.setPixmap(pix.scaled(
-                self.width() or 1080, self.height() or 1152,
-                Qt.KeepAspectRatioByExpanding,
-                Qt.SmoothTransformation
-            ))
-            self._fallback_label.setScaledContents(True)
+            self._label.setPixmap(pix)
         else:
-            self._fallback_label.setText("AIO")
-            self._fallback_label.setStyleSheet(
+            self._label.setText("AIO")
+            self._label.setStyleSheet(
                 "color: #FFD700; font-size: 72px; font-weight: bold; background-color: black;"
             )
 
-        self._layout.addWidget(self._fallback_label)
-        self._fallback_label.raise_()
-        log_debug("[AD] Fallback label shown over video widget")
-
-        # Defer cleanup to 5s later — DirectShow must fully unwind first
-        QTimer.singleShot(5000, self._safe_cleanup_video)
-
-    def _safe_cleanup_video(self):
-        """Deferred cleanup of video widget/player after fallback is shown."""
-        try:
-            if self.player:
-                # Just delete — don't call setMedia/stop/etc.
-                self.player.deleteLater()
-                self.player = None
-            if self.video_widget:
-                self.video_widget.deleteLater()
-                self.video_widget = None
-            log_debug("[AD] Video widget safely cleaned up")
-        except Exception as e:
-            log_debug(f"[AD] Video cleanup error (non-fatal): {e}")
-
-    def _on_player_error(self, error):
-        """Handle media player errors without crashing the app."""
-        if getattr(self, '_handling_error', False):
-            return
-        self._handling_error = True
-        # Do NOT access player properties (errorString, state, etc.) here —
-        # any call into the player can re-enter DirectShow causing stack overflow.
-        log_debug(f"[AD] Media player error {error}")
-        # Defer fallback to next event loop iteration to let DirectShow unwind
-        QTimer.singleShot(0, self._show_static_fallback)
+    # --- Public API (called by VerticalMultiWindow) ---
 
     def set_volume(self, vol):
         self._volume = vol
-        if self.player:
-            self.player.setVolume(vol)
+        # OpenCV video is silent — audio can be added later via separate lib
 
     def pause(self):
-        if self.player:
-            self.player.pause()
+        self._paused = True
+        self._frame_timer.stop()
+        self._slide_timer.stop()
 
     def resume(self):
-        if self.player:
-            self.player.play()
+        self._paused = False
+        if self._cap is not None:
+            fps = self._cap.get(self._cv2.CAP_PROP_FPS) or 30
+            self._frame_timer.start(int(1000 / fps))
+        elif len(self._media_files) > 1:
+            self._slide_timer.start(self.IMAGE_SLIDE_MS)
 
 
 # ------------------------------------------------------
