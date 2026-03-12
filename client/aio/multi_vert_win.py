@@ -1584,9 +1584,9 @@ QPushButton:hover {
         btn.clicked.connect(self.return_to_main)
 
         _, screen_h = self._screen_size()
-        game_y = screen_h - int(screen_h * GAME_RATIO)
+        ad_height = int(screen_h * AD_RATIO)
 
-        btn.move(30, game_y + 30)
+        btn.move(30, ad_height - 70 - 15)
         btn.raise_()
         btn.show()
         self._landscape_return_btn = btn
@@ -1601,7 +1601,7 @@ QPushButton:hover {
 
         btn_win = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         btn_win.setAttribute(Qt.WA_TranslucentBackground)
-        btn_win.setGeometry(0, ad_height, 500, 100)
+        btn_win.setGeometry(0, ad_height - 100, 500, 100)
 
         btn = QPushButton("Return", btn_win)
         btn.setFixedSize(160, 70)
@@ -1630,8 +1630,8 @@ QPushButton:hover {
         btn.leaveEvent = lambda e, b=btn: self._collapse_return_btn(b)
 
         _, screen_h = self._screen_size()
-        game_y = screen_h - int(screen_h * GAME_RATIO)
-        btn.move(30, game_y + 30)
+        ad_height = int(screen_h * AD_RATIO)
+        btn.move(30, ad_height - 70 - 15)
         btn.raise_()
         btn.show()
         btn.clicked.connect(self.return_to_main)
