@@ -1647,12 +1647,7 @@ QPushButton:hover {
             pass
 
     def _reassert_browser_position(self):
-        """Keep repositioning the browser window (no reparenting)."""
-        self._reparent_count += 1
-        if self._reparent_count > 20:  # 10 seconds
-            self._reparent_timer.stop()
-            return
-
+        """Keep repositioning the browser window continuously while game is active."""
         game_hwnd, ad_height, screen_w, game_height = self._reparent_params
         if not game_hwnd:
             self._reparent_timer.stop()
@@ -1663,17 +1658,26 @@ QPushButton:hover {
                 self._reparent_timer.stop()
                 return
 
-            # Remove title bar if it reappeared
-            style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
-            if style & win32con.WS_CAPTION:
+            # Check if window has moved or resized (e.g. JS fullscreen request)
+            rect = win32gui.GetWindowRect(game_hwnd)
+            cur_x, cur_y, cur_r, cur_b = rect
+            cur_w = cur_r - cur_x
+            cur_h = cur_b - cur_y
+            needs_fix = (cur_x != 0 or cur_y != ad_height or
+                         cur_w != screen_w or cur_h != game_height)
+
+            if needs_fix:
+                log_debug(f"[VERT] Browser escaped to {rect}, repositioning")
+                # Remove title bar / frame if reappeared
+                style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
                 style &= ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
                            win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
                            win32con.WS_MAXIMIZEBOX)
                 style |= win32con.WS_VISIBLE
                 win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, style)
 
-            # Re-position
-            win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
+                # Force back to bottom 40%
+                win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
         except Exception:
             pass
 
@@ -1719,13 +1723,22 @@ QPushButton:hover {
                 ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
             ]
 
+        # Keys to block unconditionally (no modifier needed)
+        VK_F11 = 0x7A
+        VK_ESCAPE = 0x1B
+
         def hook_proc(nCode, wParam, lParam):
             if nCode == HC_ACTION and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
                 kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                # Block F11 (fullscreen toggle) and Escape (exit fullscreen)
+                if kb.vkCode in (VK_F11, VK_ESCAPE):
+                    log_debug(f"[VERT] Blocked key 0x{kb.vkCode:02X}")
+                    return 1
+                # Block Ctrl+<key> Chrome shortcuts
                 ctrl_down = ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000
                 if ctrl_down and kb.vkCode in BLOCKED_VKEYS:
                     log_debug(f"[VERT] Blocked Ctrl+{chr(kb.vkCode)}")
-                    return 1  # block the key
+                    return 1
             return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
 
         self._hook_proc_ref = HOOKPROC(hook_proc)  # prevent GC
