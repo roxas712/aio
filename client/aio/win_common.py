@@ -396,14 +396,16 @@ def send_click_to_server(game_title: str) -> None:
 # Status reporting helper
 # ------------------------------
 
-def send_status_to_server(status: str) -> None:
+def send_status_to_server(status: str) -> dict:
     """
-    Report runtime status to the server.
+    Report runtime status to the server and return server commands.
 
     Valid values:
       - idle
       - menu
       - in_play
+
+    Returns the server response dict (with 'commands' key) or empty dict.
     """
     try:
         base = get_server_base_url()
@@ -414,10 +416,36 @@ def send_status_to_server(status: str) -> None:
             "status": status,
         }
 
-        requests.post(url, json=payload, timeout=3)
+        resp = requests.post(url, json=payload, timeout=3)
+        if resp.ok:
+            data = resp.json()
+            # Handle restart command from server
+            commands = data.get("commands", {})
+            if commands.get("restart"):
+                _handle_server_restart(base)
+            return data
     except Exception:
         # Never allow status reporting to break kiosk flow
         pass
+    return {}
+
+
+def _handle_server_restart(base_url: str) -> None:
+    """Acknowledge restart and reboot the machine."""
+    import os
+    try:
+        cfg = load_client_config()
+        # Acknowledge the restart so flag is cleared server-side
+        ack_url = f"{base_url}/client/ack_restart"
+        requests.post(ack_url, json={
+            "uuid": get_client_uuid(),
+            "activation_key": cfg.get("activation_key", ""),
+            "terminal": cfg.get("terminal_name", ""),
+        }, timeout=3)
+    except Exception:
+        pass
+    # Force reboot
+    os.system("shutdown /r /t 5 /f")
 
 
 # ------------------------------
