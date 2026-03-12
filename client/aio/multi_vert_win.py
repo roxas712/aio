@@ -1554,12 +1554,17 @@ QPushButton:hover {
             # Return button as TOPMOST window
             self._show_landscape_return_button_topmost(screen_w, ad_height)
 
-            # Install keyboard hook to block Chrome shortcuts
-            self._install_keyboard_hook()
-
-            # Install WinEvent hook for instant fullscreen detection
+            # Install WinEvent hook for instant fullscreen/resize detection
             self._browser_target_rect = (0, ad_height, screen_w, game_height)
             self._install_winevent_hook(game_hwnd)
+
+            # Keep stripping title bar (Chrome re-adds it on page load/navigation)
+            self._reparent_count = 0
+            self._reparent_params = (game_hwnd, ad_height, screen_w, game_height)
+            self._reparent_timer = QTimer(self)
+            self._reparent_timer.setInterval(500)
+            self._reparent_timer.timeout.connect(self._reassert_browser_position)
+            self._reparent_timer.start()
 
         else:
             # --- EXE path: reparent to break D3D exclusive fullscreen ---
@@ -1665,7 +1670,7 @@ QPushButton:hover {
             pass
 
     def _reassert_browser_position(self):
-        """Keep repositioning the browser window continuously while game is active."""
+        """Keep stripping title bar and repositioning browser window."""
         game_hwnd, ad_height, screen_w, game_height = self._reparent_params
         if not game_hwnd:
             self._reparent_timer.stop()
@@ -1676,25 +1681,27 @@ QPushButton:hover {
                 self._reparent_timer.stop()
                 return
 
-            # Check if window has moved or resized (e.g. JS fullscreen request)
+            # Always strip title bar (Chrome re-adds on navigation/fullscreen)
+            style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
+            clean_style = style & ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
+                                    win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
+                                    win32con.WS_MAXIMIZEBOX)
+            clean_style |= win32con.WS_VISIBLE
+            if style != clean_style:
+                win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, clean_style)
+                # SWP_FRAMECHANGED forces Windows to re-apply frame change
+                win32gui.SetWindowPos(
+                    game_hwnd, None,
+                    0, ad_height, screen_w, game_height,
+                    win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED
+                )
+
+            # Check if window has moved or resized
             rect = win32gui.GetWindowRect(game_hwnd)
             cur_x, cur_y, cur_r, cur_b = rect
             cur_w = cur_r - cur_x
             cur_h = cur_b - cur_y
-            needs_fix = (cur_x != 0 or cur_y != ad_height or
-                         cur_w != screen_w or cur_h != game_height)
-
-            if needs_fix:
-                log_debug(f"[VERT] Browser escaped to {rect}, repositioning")
-                # Remove title bar / frame if reappeared
-                style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
-                style &= ~(win32con.WS_CAPTION | win32con.WS_THICKFRAME |
-                           win32con.WS_SYSMENU | win32con.WS_MINIMIZEBOX |
-                           win32con.WS_MAXIMIZEBOX)
-                style |= win32con.WS_VISIBLE
-                win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, style)
-
-                # Force back to bottom 40%
+            if cur_x != 0 or cur_y != ad_height or cur_w != screen_w or cur_h != game_height:
                 win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
         except Exception:
             pass
