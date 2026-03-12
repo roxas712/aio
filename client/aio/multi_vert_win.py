@@ -886,6 +886,11 @@ QPushButton:hover {
         old_carousel.setParent(None)
         old_carousel.deleteLater()
 
+        # Clear parent-class margins BEFORE inserting new carousel
+        mm_layout = self.main_menu.layout()
+        if mm_layout:
+            mm_layout.setContentsMargins(0, 0, 0, 0)
+
         screen_w, _ = self._screen_size()
         new_carousel = CarouselWidget(
             games=self.games,
@@ -897,12 +902,13 @@ QPushButton:hover {
             num_visible=5,
             gap=-55,
         )
-        # Fill full width — no alignment flags that could shift the container
+        # Fill full width — zero all padding so container sits at x=0
         new_carousel.layout().setContentsMargins(0, 0, 0, 0)
         new_carousel.layout().setSpacing(0)
         new_carousel.setFixedWidth(screen_w)
         self.main_menu.carousel = new_carousel
-        self.main_menu.layout().insertWidget(1, new_carousel)
+        # alignment=0 ensures no AlignHCenter is applied to this widget item
+        mm_layout.insertWidget(1, new_carousel, 0, Qt.Alignment(0))
 
     def _on_volume_changed(self, vol):
         if self.ad_overlay:
