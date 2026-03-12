@@ -564,6 +564,7 @@ class BlurImageButton(QWidget):
         # Title label overlay; hidden by default, shown on hover
         self.label = OutlinedLabel(title, self)
         self.label.setAlignment(Qt.AlignCenter)
+        self.label.setWordWrap(True)
         font = self.label.font()
         font.setPointSize(18)
         font.setBold(True)
@@ -629,14 +630,20 @@ class BlurImageButton(QWidget):
         clip_path.addRoundedRect(inner_rect, radius, radius)
         painter.setClipPath(clip_path)
 
+        # Dark background fill so no empty space shows around fitted logos
+        painter.setBrush(QColor(15, 10, 30))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(inner_rect, radius, radius)
+
         if not self._pixmap.isNull():
             scaled = self._pixmap.scaled(
-                self.size(),
-                Qt.KeepAspectRatioByExpanding,
+                int(inner_rect.width()),
+                int(inner_rect.height()),
+                Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
             )
-            x_offset = int((self.width() - scaled.width()) / 2)
-            y_offset = int((self.height() - scaled.height()) / 2)
+            x_offset = int(inner_rect.x() + (inner_rect.width() - scaled.width()) / 2)
+            y_offset = int(inner_rect.y() + (inner_rect.height() - scaled.height()) / 2)
             painter.drawPixmap(x_offset, y_offset, scaled)
 
         painter.setClipping(False)
