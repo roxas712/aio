@@ -157,7 +157,6 @@ class AdLoopWidget(QWidget):
 
         self._label = QLabel(self)
         self._label.setAlignment(Qt.AlignCenter)
-        self._label.setScaledContents(True)
         self._layout.addWidget(self._label)
 
         self._media_files = []   # list of Paths (.mp4, .jpg, etc.)
@@ -211,7 +210,8 @@ class AdLoopWidget(QWidget):
             self._media_files = media
             self._current_idx = 0
             log_debug(f"[AD] {len(media)} ad(s) found ({sum(1 for m in media if m.suffix == '.mp4')} video)")
-            self._play_current()
+            # Defer playback start so fullscreen geometry settles first
+            QTimer.singleShot(1000, self._play_current)
         else:
             log_debug("[AD] No ads found, showing branded fallback")
             self._show_branded_fallback()
@@ -241,9 +241,14 @@ class AdLoopWidget(QWidget):
             return
 
         self._cap = cap
+        vid_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        vid_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 30
         self._frame_timer.start(int(1000 / fps))
-        log_debug(f"[AD] Playing video: {path.name} ({fps:.0f} fps)")
+        log_debug(f"[AD] Playing video: {path.name} ({vid_w}x{vid_h} @ {fps:.0f} fps)")
+        log_debug(f"[AD] Widget size: {self.width()}x{self.height()}, "
+                  f"label size: {self._label.width()}x{self._label.height()}")
+        self._frame_count = 0
 
     def _read_frame(self):
         """Read one frame from the video, resize to widget, and display."""
@@ -263,14 +268,24 @@ class AdLoopWidget(QWidget):
                 if not ret:
                     return
 
-        # Resize frame to fit widget (keeps all content visible, may letterbox)
-        lw, lh = self._label.width(), self._label.height()
-        if lw > 0 and lh > 0:
-            frame = self._cv2.resize(frame, (lw, lh), interpolation=self._cv2.INTER_AREA)
+        # Use parent widget dimensions (more reliable than label during layout)
+        target_w = self.width()
+        target_h = self.height()
+
+        # Log first frame dimensions for debugging
+        self._frame_count = getattr(self, '_frame_count', 0) + 1
+        if self._frame_count == 1:
+            log_debug(f"[AD] First frame: video={frame.shape[1]}x{frame.shape[0]}, "
+                      f"target={target_w}x{target_h}")
+
+        if target_w > 0 and target_h > 0:
+            frame = self._cv2.resize(frame, (target_w, target_h),
+                                     interpolation=self._cv2.INTER_AREA)
 
         h, w, ch = frame.shape
         rgb = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
-        qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+        # Use strides for correct byte alignment; .copy() ensures data ownership
+        qimg = QImage(rgb.data, w, h, rgb.strides[0], QImage.Format_RGB888).copy()
         self._label.setPixmap(QPixmap.fromImage(qimg))
 
     def _show_image(self, path: Path):
@@ -820,6 +835,7 @@ QPushButton:hover {
         # Position ad overlay over the top 60%
         self.ad_overlay.setGeometry(0, 0, screen_w, ad_height)
         self.ad_overlay.raise_()
+        log_debug(f"[VERT] ad_geometry updated: {screen_w}x{ad_height}")
 
     def _enforce_bottom_layout(self):
         """Re-apply the top margin that pushes game content to bottom 40%."""
