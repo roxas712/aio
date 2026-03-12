@@ -187,23 +187,28 @@ class AdLoopWidget(QWidget):
 
         has_cv2 = self._try_import_cv2()
 
+        VIDEO_EXTS = ("*.mp4", "*.mov", "*.avi", "*.mkv")
+
         # Seed ads folder with default video if empty
-        if has_cv2 and not list(folder_path.glob("*.mp4")):
-            default_vid = AIO_ROOT / "kiosk" / "vids" / "AIO_upper-loop.mp4"
-            if default_vid.exists():
-                try:
-                    import shutil
-                    shutil.copy2(str(default_vid), str(folder_path / default_vid.name))
-                    log_debug("[AD] Copied default ad loop to ads folder")
-                except Exception as e:
-                    log_debug(f"[AD] Failed to copy default ad: {e}")
+        if has_cv2 and not any(folder_path.glob(e) for e in VIDEO_EXTS):
+            for name in ("AIO_upper-loop.mov", "AIO_upper-loop.mp4"):
+                default_vid = AIO_ROOT / "kiosk" / "vids" / name
+                if default_vid.exists():
+                    try:
+                        import shutil
+                        shutil.copy2(str(default_vid), str(folder_path / default_vid.name))
+                        log_debug(f"[AD] Copied default ad loop: {name}")
+                    except Exception as e:
+                        log_debug(f"[AD] Failed to copy default ad: {e}")
+                    break
 
         # Collect media files
         media = []
         for ext in ("*.jpg", "*.jpeg", "*.png", "*.bmp"):
             media.extend(folder_path.glob(ext))
         if has_cv2:
-            media.extend(folder_path.glob("*.mp4"))
+            for ext in VIDEO_EXTS:
+                media.extend(folder_path.glob(ext))
         media = list(sorted(media))
 
         if media:
@@ -226,7 +231,7 @@ class AdLoopWidget(QWidget):
 
         path = self._media_files[self._current_idx]
 
-        if path.suffix.lower() == ".mp4":
+        if path.suffix.lower() in (".mp4", ".mov", ".avi", ".mkv"):
             self._play_video(path)
         else:
             self._show_image(path)
