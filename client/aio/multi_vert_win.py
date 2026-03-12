@@ -661,11 +661,21 @@ class VerticalMultiWindow(MainWindow):
         # Ad overlay uses physical screen coordinates
         ad_phys = int(_init_h * AD_RATIO)
 
-        # Do NOT set contentsMargins on central widget — let bg_label and
-        # stack fill the full window.  Game content is pushed down via a
-        # fixed spacer inside MainMenu instead.
+        # Zero out central widget margins — stack fills the full window;
+        # game content is pushed down via a fixed spacer inside MainMenu.
         if self._multi_root.layout():
             self._multi_root.layout().setContentsMargins(0, 0, 0, 0)
+
+        # Pull bg_label out of the grid layout and position it to cover
+        # only the bottom 40% (game area).  The original 1920x1080 bg.gif
+        # would stretch badly if scaled to the full 1080x1920 portrait screen.
+        central_layout = self._multi_root.layout()
+        if central_layout:
+            central_layout.removeWidget(self.bg_label)
+        self.bg_label.setParent(self._multi_root)
+        game_h = _init_h - ad_phys
+        self.bg_label.setGeometry(0, ad_phys, _init_w, game_h)
+        self.bg_label.lower()  # behind stack and ad overlay
 
         # Create Ad Overlay as child of central widget (covers top 60%)
         self.ad_overlay = AdLoopWidget(self._multi_root)
@@ -871,16 +881,19 @@ QPushButton:hover {
         self.showFullScreen()
 
         # The window's logical width may exceed the physical screen width
-        # (DPI scaling).  Constrain the stack and background to the physical
-        # screen size so Qt layouts center content within the visible area.
+        # (DPI scaling).  Constrain the stack to the physical screen size so
+        # Qt layouts center content within the visible area.
         self.stack.setFixedSize(screen_w, screen_h)
-        self.bg_label.setFixedSize(screen_w, screen_h)
 
-        # Left-align so they start at x=0 (the visible left edge)
+        # Left-align stack so it starts at x=0 (the visible left edge)
         central_layout = self._multi_root.layout()
         if central_layout:
             central_layout.setAlignment(self.stack, Qt.AlignLeft | Qt.AlignTop)
-            central_layout.setAlignment(self.bg_label, Qt.AlignLeft | Qt.AlignTop)
+
+        # Position bg_label to cover only the bottom 40% (game area)
+        ad_phys = int(screen_h * AD_RATIO)
+        game_h = screen_h - ad_phys
+        self.bg_label.setGeometry(0, ad_phys, screen_w, game_h)
 
         self._position_volume_button()
 
@@ -919,9 +932,10 @@ QPushButton:hover {
             if self.main_menu.layout():
                 self.main_menu.layout().invalidate()
 
-        # Re-constrain stack/bg to physical screen (handles orientation changes)
+        # Re-constrain stack to physical screen; bg covers game area only
         self.stack.setFixedSize(screen_w, screen_h)
-        self.bg_label.setFixedSize(screen_w, screen_h)
+        game_h = screen_h - ad_phys
+        self.bg_label.setGeometry(0, ad_phys, screen_w, game_h)
 
     def _enforce_bottom_layout(self):
         """Re-apply the ad spacer height in case it drifted."""
