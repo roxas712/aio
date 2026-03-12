@@ -40,7 +40,10 @@ import win32con
 import win32process
 
 from PyQt5.QtCore import Qt, QTimer, QSize
-from PyQt5.QtGui import QIcon, QImage, QPainter, QColor, QPixmap
+from PyQt5.QtGui import (
+    QIcon, QImage, QPainter, QColor, QPixmap,
+    QLinearGradient, QRadialGradient, QFont, QPen, QBrush,
+)
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QApplication, QSizePolicy, QSpacerItem,
@@ -71,35 +74,175 @@ GAME_RATIO = 0.40
 # ------------------------------------------------------
 
 class LoadingOverlay(QWidget):
-    """Opaque dark overlay with centered text for loading/returning transitions."""
+    """Synthwave-themed loading overlay with neon grid, glow bars, and logo."""
+
+    # Theme colours
+    _BG = QColor(10, 10, 46)           # deep navy
+    _GRID = QColor(200, 50, 200, 100)  # magenta grid
+    _PINK = QColor(255, 50, 150)       # neon pink
+    _CYAN = QColor(0, 200, 255)        # neon cyan
+    _GLOW_PINK = QColor(255, 50, 150, 60)
+    _GLOW_CYAN = QColor(0, 200, 255, 60)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAutoFillBackground(True)
-        pal = self.palette()
-        pal.setColor(self.backgroundRole(), QColor(0, 0, 0))
-        self.setPalette(pal)
+        self.setAttribute(Qt.WA_OpaquePaintEvent)
         self.hide()
 
-        self._label = QLabel("Loading...", self)
-        self._label.setAlignment(Qt.AlignCenter)
-        self._label.setStyleSheet("""
-            color: white;
-            font-size: 36px;
-            font-weight: bold;
-            background: black;
-        """)
+        self._text = "Loading..."
+        self._dot_count = 0          # animated dots 0-3
+        self._pulse_alpha = 255      # text glow pulse
+        self._pulse_dir = -5
+
+        # Load Panda Master logo
+        self._logo = QPixmap()
+        logo_path = Path(__file__).resolve().parent / "img" / "pandamaster.png"
+        if logo_path.exists():
+            self._logo = QPixmap(str(logo_path).replace("\\", "/"))
+
+        # Animation timer — dots cycle + glow pulse
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(350)
+        self._anim_timer.timeout.connect(self._animate)
+
+    # ---- painting -------------------------------------------------------
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+
+        # 1) Dark navy background
+        p.fillRect(self.rect(), self._BG)
+
+        # 2) Perspective grid — bottom half
+        self._draw_grid(p, w, h)
+
+        # 3) Horizontal neon glow bars
+        self._draw_glow_bars(p, w, h)
+
+        # 4) Logo centred in upper-middle area
+        self._draw_logo(p, w, h)
+
+        # 5) Loading text with glow
+        self._draw_text(p, w, h)
+
+        p.end()
+
+    def _draw_grid(self, p, w, h):
+        """Draw perspective grid lines (top and bottom halves)."""
+        pen = QPen(self._GRID, 1)
+        p.setPen(pen)
+
+        cx, cy = w // 2, h // 2  # vanishing point
+
+        # Horizontal lines — bottom half (receding into distance)
+        num_h = 12
+        for i in range(1, num_h + 1):
+            frac = i / num_h
+            y = cy + int(frac * (h // 2))
+            # Lines get wider apart as they go down (perspective)
+            p.drawLine(0, y, w, y)
+
+        # Horizontal lines — top half (receding upward)
+        for i in range(1, num_h + 1):
+            frac = i / num_h
+            y = cy - int(frac * (h // 2))
+            p.drawLine(0, y, w, y)
+
+        # Vertical converging lines
+        num_v = 16
+        for i in range(num_v + 1):
+            x = int(i * w / num_v)
+            # Bottom half — converge to centre
+            p.drawLine(cx, cy, x, h)
+            # Top half — converge to centre
+            p.drawLine(cx, cy, x, 0)
+
+    def _draw_glow_bars(self, p, w, h):
+        """Two horizontal neon glow bars across the middle."""
+        cy = h // 2
+        bar_gap = int(h * 0.12)  # gap between the two bars
+
+        for offset, color_a, color_b in [
+            (-bar_gap, self._PINK, self._GLOW_PINK),
+            (bar_gap, self._CYAN, self._GLOW_CYAN),
+        ]:
+            y = cy + offset
+            # Outer glow (wide, semi-transparent)
+            grad = QLinearGradient(0, y - 20, 0, y + 20)
+            grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+            grad.setColorAt(0.4, color_b)
+            grad.setColorAt(0.5, color_a)
+            grad.setColorAt(0.6, color_b)
+            grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+            p.fillRect(0, y - 20, w, 40, QBrush(grad))
+
+            # Core bright line
+            p.setPen(QPen(color_a, 2))
+            p.drawLine(0, y, w, y)
+
+    def _draw_logo(self, p, w, h):
+        """Draw the Panda Master logo centred between the glow bars."""
+        if self._logo.isNull():
+            return
+        # Scale logo to fit nicely (max 60% width, max 40% height)
+        max_w = int(w * 0.60)
+        max_h = int(h * 0.40)
+        scaled = self._logo.scaled(max_w, max_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        x = (w - scaled.width()) // 2
+        y = (h - scaled.height()) // 2 - int(h * 0.05)  # slightly above centre
+        p.drawPixmap(x, y, scaled)
+
+    def _draw_text(self, p, w, h):
+        """Draw the loading text with neon glow below the logo."""
+        dots = "." * self._dot_count
+        display = self._text.rstrip(".") + dots
+
+        font = QFont("Arial", 28, QFont.Bold)
+        p.setFont(font)
+
+        text_y = int(h * 0.78)
+
+        # Glow behind text
+        glow_color = QColor(self._CYAN)
+        glow_color.setAlpha(self._pulse_alpha // 3)
+        p.setPen(glow_color)
+        for dx in (-2, 0, 2):
+            for dy in (-2, 0, 2):
+                p.drawText(dx, text_y + dy - 14, w, 40, Qt.AlignHCenter | Qt.AlignTop, display)
+
+        # Main text
+        text_color = QColor(255, 255, 255, self._pulse_alpha)
+        p.setPen(text_color)
+        p.drawText(0, text_y - 14, w, 40, Qt.AlignHCenter | Qt.AlignTop, display)
+
+    # ---- animation ------------------------------------------------------
+
+    def _animate(self):
+        self._dot_count = (self._dot_count + 1) % 4
+        self._pulse_alpha += self._pulse_dir
+        if self._pulse_alpha <= 140:
+            self._pulse_dir = 5
+        elif self._pulse_alpha >= 255:
+            self._pulse_dir = -5
+        self.update()
+
+    # ---- public API (unchanged) -----------------------------------------
 
     def resizeEvent(self, event):
-        self._label.setGeometry(self.rect())
         super().resizeEvent(event)
 
     def show_loading(self, text="Loading..."):
-        self._label.setText(text)
+        self._text = text
+        self._dot_count = 0
+        self._pulse_alpha = 255
         self.raise_()
         self.show()
+        self._anim_timer.start()
 
     def hide_loading(self):
+        self._anim_timer.stop()
         self.hide()
 
 
