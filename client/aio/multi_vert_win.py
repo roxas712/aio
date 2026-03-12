@@ -1120,6 +1120,8 @@ QPushButton:hover {
 
             if proc:
                 self._store_game_pid(proc.pid, title)
+                # Store exe name for fallback window matching
+                self._game_exe_name = os.path.basename(target)
 
                 if is_full_vertical:
                     if self.ad_overlay:
@@ -1221,10 +1223,10 @@ QPushButton:hover {
     # Window Constraint (PID-based with retry)
     # --------------------------------------------------
 
-    def _constrain_landscape_window(self, pid, retries=5):
+    def _constrain_landscape_window(self, pid, retries=10):
         """
         Constrain launched platform window into bottom 40% of portrait screen.
-        Uses PID-based matching with retry logic and border removal.
+        Uses PID-based matching first, then falls back to exe-name matching.
         """
         if self.ad_overlay:
             self.ad_overlay.show()
@@ -1236,14 +1238,25 @@ QPushButton:hover {
         game_height = int(screen_h * GAME_RATIO)
         y_offset = screen_h - game_height
 
-        # Get all PIDs in the process tree
+        # Build set of PIDs to match: original + children + exe-name siblings
+        exe_name = getattr(self, '_game_exe_name', None)
         try:
             parent = psutil.Process(pid)
             pids = {pid} | {c.pid for c in parent.children(recursive=True)}
         except Exception:
             pids = {pid}
 
+        # Fallback: find all PIDs matching the exe name (handles launcher-spawned processes)
+        if exe_name:
+            try:
+                for p in psutil.process_iter(['pid', 'name']):
+                    if p.info['name'] and p.info['name'].lower() == exe_name.lower():
+                        pids.add(p.info['pid'])
+            except Exception:
+                pass
+
         found = False
+        our_pid = os.getpid()
 
         def enum_handler(hwnd, _):
             nonlocal found
@@ -1255,7 +1268,14 @@ QPushButton:hover {
             except Exception:
                 return
 
-            if win_pid not in pids:
+            if win_pid not in pids or win_pid == our_pid:
+                return
+
+            # Skip tiny/invisible windows (splash screens, hidden helpers)
+            rect = win32gui.GetWindowRect(hwnd)
+            w = rect[2] - rect[0]
+            h = rect[3] - rect[1]
+            if w < 100 or h < 100:
                 return
 
             found = True
@@ -1297,7 +1317,7 @@ QPushButton:hover {
                 0, y_offset, screen_w, game_height,
                 win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED | win32con.SWP_SHOWWINDOW
             )
-            log_debug(f"[VERT] Constrained hwnd={hwnd} title='{title}' to (0,{y_offset},{screen_w},{game_height})")
+            log_debug(f"[VERT] Constrained hwnd={hwnd} pid={win_pid} title='{title}' to (0,{y_offset},{screen_w},{game_height})")
 
         try:
             win32gui.EnumWindows(enum_handler, None)
@@ -1308,11 +1328,12 @@ QPushButton:hover {
             self._show_landscape_return_button()
         elif retries > 0:
             QTimer.singleShot(
-                800,
+                1000,
                 lambda: self._constrain_landscape_window(pid, retries=retries - 1)
             )
         else:
-            log_debug(f"[VERT] Failed to find window for PID {pid} after all retries")
+            log_debug(f"[VERT] Failed to find window for PID {pid} (exe={exe_name}) after all retries")
+            log_debug(f"[VERT] Searched PIDs: {pids}")
             self._show_landscape_return_button()
 
     # --------------------------------------------------
@@ -1399,7 +1420,7 @@ QPushButton:hover {
             except Exception:
                 pass
 
-        # Kill game process
+        # Kill game process by PID
         try:
             if GAME_PID_FILE.exists():
                 pid = GAME_PID_FILE.read_text().strip()
@@ -1413,6 +1434,20 @@ QPushButton:hover {
                 GAME_PID_FILE.unlink(missing_ok=True)
         except Exception:
             pass
+
+        # Also kill by exe name (handles launcher-spawned processes)
+        exe_name = getattr(self, '_game_exe_name', None)
+        if exe_name:
+            try:
+                log_debug(f"[VERT] Killing by exe name: {exe_name}")
+                subprocess.run(
+                    ["taskkill", "/IM", exe_name, "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+            self._game_exe_name = None
 
         self._game_pid = None
 
