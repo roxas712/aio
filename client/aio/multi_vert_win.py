@@ -1111,9 +1111,6 @@ QPushButton:hover {
         if hasattr(self, '_loading_overlay'):
             self._loading_overlay.show_loading("Loading...")
 
-        # Reset constrain phase for new game launch
-        self._constrain_phase = 0
-
         # Snapshot existing windows so we can find new ones after launch
         self._pre_launch_hwnds = set()
         try:
@@ -1281,186 +1278,31 @@ QPushButton:hover {
     # Window Constraint (PID-based with retry)
     # --------------------------------------------------
 
-    def _constrain_window(self, hwnd, y_offset, screen_w, game_height):
-        """Break D3D fullscreen and position window into the bottom game region.
-
-        Strategy:
-        Phase 1 (first call): Send real Alt+Enter via SendInput to break D3D
-                              exclusive fullscreen, then return to let game process it.
-        Phase 2 (second call): Minimize window to force D3D mode switch if
-                               Alt+Enter didn't work, then return.
-        Phase 3+: Strip styles and reposition into bottom 40%.
-        """
-        title = win32gui.GetWindowText(hwnd)
-        phase = getattr(self, '_constrain_phase', 0)
-
+    def _make_overlay_topmost(self, widget):
+        """Make a Qt widget's native window always-on-top via Win32 API."""
         try:
-            rect = win32gui.GetWindowRect(hwnd)
-            style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-        except Exception:
-            rect = (0, 0, 0, 0)
-            style = 0
-
-        log_debug(f"[VERT] _constrain phase={phase} '{title}' rect={rect} style=0x{style:08X}")
-
-        # Phase 1: Send real Alt+Enter via SendInput (OS-level keyboard simulation)
-        if phase == 0:
-            self._constrain_phase = 1
-            log_debug(f"[VERT] Phase 0: Sending Alt+Enter via SendInput")
-            try:
-                import ctypes
-                from ctypes import wintypes
-
-                # SendInput structures
-                INPUT_KEYBOARD = 1
-                KEYEVENTF_KEYUP = 0x0002
-                VK_MENU = 0x12    # Alt key
-                VK_RETURN = 0x0D  # Enter key
-
-                class KEYBDINPUT(ctypes.Structure):
-                    _fields_ = [
-                        ("wVk", wintypes.WORD),
-                        ("wScan", wintypes.WORD),
-                        ("dwFlags", wintypes.DWORD),
-                        ("time", wintypes.DWORD),
-                        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-                    ]
-
-                class INPUT(ctypes.Structure):
-                    class _INPUT(ctypes.Union):
-                        _fields_ = [("ki", KEYBDINPUT)]
-                    _fields_ = [
-                        ("type", wintypes.DWORD),
-                        ("_input", _INPUT),
-                    ]
-
-                def make_key_input(vk, flags=0):
-                    inp = INPUT()
-                    inp.type = INPUT_KEYBOARD
-                    inp._input.ki.wVk = vk
-                    inp._input.ki.dwFlags = flags
-                    inp._input.ki.time = 0
-                    inp._input.ki.dwExtraInfo = ctypes.pointer(ctypes.c_ulong(0))
-                    return inp
-
-                # Bring game window to foreground first
-                win32gui.SetForegroundWindow(hwnd)
-
-                # Build input sequence: Alt down, Enter down, Enter up, Alt up
-                inputs = (INPUT * 4)(
-                    make_key_input(VK_MENU),                          # Alt down
-                    make_key_input(VK_RETURN),                        # Enter down
-                    make_key_input(VK_RETURN, KEYEVENTF_KEYUP),       # Enter up
-                    make_key_input(VK_MENU, KEYEVENTF_KEYUP),         # Alt up
-                )
-                ctypes.windll.user32.SendInput(4, ctypes.byref(inputs), ctypes.sizeof(INPUT))
-                log_debug(f"[VERT] SendInput Alt+Enter sent successfully")
-            except Exception as e:
-                log_debug(f"[VERT] SendInput Alt+Enter failed: {e}")
-            return  # Let game process the keystroke
-
-        # Phase 2: If still fullscreen, try minimize+restore to break D3D
-        if phase == 1:
-            self._constrain_phase = 2
-            # Check if Alt+Enter worked (rect should have changed)
-            still_fullscreen = (rect[0] == 0 and rect[1] == 0 and
-                                rect[2] >= screen_w - 10 and rect[3] >= y_offset + game_height)
-            if still_fullscreen:
-                log_debug(f"[VERT] Phase 1: Alt+Enter didn't work, trying minimize+restore")
-                try:
-                    win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
-                except Exception as e:
-                    log_debug(f"[VERT] Minimize failed: {e}")
-                return  # Let minimize take effect, restore on next call
-            else:
-                log_debug(f"[VERT] Phase 1: Alt+Enter worked! rect={rect}")
-                # Fall through to repositioning
-
-        # Phase 3: Restore from minimize if needed, strip styles, reposition
-        if phase == 2:
-            self._constrain_phase = 3
-            try:
-                # Check if minimized
-                if win32gui.IsIconic(hwnd):
-                    log_debug(f"[VERT] Phase 2: Restoring from minimize")
-                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                    return  # Let restore take effect
-            except Exception:
-                pass
-
-        # Strip window styles for borderless
-        try:
-            style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-            new_style = style & ~(
-                win32con.WS_POPUP | win32con.WS_CAPTION | win32con.WS_THICKFRAME
-                | win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX
-                | win32con.WS_SYSMENU | win32con.WS_OVERLAPPEDWINDOW
-            )
-            new_style |= win32con.WS_VISIBLE | win32con.WS_CLIPSIBLINGS
-            win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, new_style)
-        except Exception:
-            pass
-
-        # Remove extended style bits
-        try:
-            ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-            ex_style &= ~(win32con.WS_EX_TOPMOST | win32con.WS_EX_DLGMODALFRAME
-                          | win32con.WS_EX_CLIENTEDGE | win32con.WS_EX_STATICEDGE)
-            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, ex_style)
-        except Exception:
-            pass
-
-        # Position into bottom game region
-        try:
+            hwnd = int(widget.winId())
             win32gui.SetWindowPos(
-                hwnd, win32con.HWND_NOTOPMOST,
-                0, y_offset, screen_w, game_height,
-                win32con.SWP_FRAMECHANGED | win32con.SWP_SHOWWINDOW
+                hwnd, win32con.HWND_TOPMOST,
+                0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
             )
-        except Exception:
-            pass
-
-        try:
-            win32gui.MoveWindow(hwnd, 0, y_offset, screen_w, game_height, True)
-        except Exception:
-            pass
-
-        # Verify
-        try:
-            rect = win32gui.GetWindowRect(hwnd)
-            log_debug(f"[VERT] AFTER reposition: rect={rect} (target: 0,{y_offset},{screen_w},{y_offset + game_height})")
-        except Exception:
-            pass
+            log_debug(f"[VERT] Made widget TOPMOST hwnd=0x{hwnd:08X}")
+        except Exception as e:
+            log_debug(f"[VERT] Failed to make TOPMOST: {e}")
 
     def _constrain_landscape_window(self, pid, retries=10):
         """
-        Constrain launched platform window into bottom 40% of portrait screen.
-        Strategy: PID match → exe-name match → new-window detection (snapshot diff).
+        Detect launched game window, then overlay ads on top of it.
+
+        D3D games resist all Win32 repositioning — instead we let the game
+        run fullscreen and place our ad overlay + return button on top via
+        HWND_TOPMOST.  The user sees ads covering the top 60%, game visible
+        in the bottom 40%.
         """
-        if self.ad_overlay:
-            self.ad_overlay.show()
-
-        # Get physical screen size via DPI-aware API
-        user32 = ctypes.windll.user32
-        try:
-            # Make this thread DPI-aware so GetSystemMetrics returns physical pixels
-            user32.SetProcessDPIAware()
-        except Exception:
-            pass
-        phys_w = user32.GetSystemMetrics(0)
-        phys_h = user32.GetSystemMetrics(1)
-
-        # Also get Qt logical size
-        qt_w, qt_h = self._screen_size()
-
-        # SetWindowPos needs physical pixels — use GetSystemMetrics values
-        screen_w = phys_w
-        screen_h = phys_h
-
-        game_height = int(screen_h * GAME_RATIO)
-        y_offset = screen_h - game_height
-        log_debug(f"[VERT] Constrain target: phys={phys_w}x{phys_h} qt={qt_w}x{qt_h} "
-                  f"using={screen_w}x{screen_h} y={y_offset} h={game_height}")
+        screen_w, screen_h = self._screen_size()
+        ad_height = int(screen_h * AD_RATIO)
+        log_debug(f"[VERT] Waiting for game window (pid={pid}, retry={10-retries})")
 
         # Build set of PIDs to match: original + children + exe-name siblings
         exe_name = getattr(self, '_game_exe_name', None)
@@ -1470,7 +1312,6 @@ QPushButton:hover {
         except Exception:
             pids = {pid}
 
-        # Fallback: find all PIDs matching the exe name
         if exe_name:
             try:
                 for p in psutil.process_iter(['pid', 'name']):
@@ -1487,34 +1328,26 @@ QPushButton:hover {
             nonlocal found
             if not win32gui.IsWindowVisible(hwnd):
                 return
-
-            # Skip tiny windows
             rect = win32gui.GetWindowRect(hwnd)
             w = rect[2] - rect[0]
             h = rect[3] - rect[1]
             if w < 200 or h < 200:
                 return
-
             try:
                 _, win_pid = win32process.GetWindowThreadProcessId(hwnd)
             except Exception:
                 return
-
             if win_pid == our_pid:
                 return
-
-            # Match by PID or by "new window" (not in pre-launch snapshot)
             pid_match = win_pid in pids
             new_window = hwnd not in pre_launch and len(pre_launch) > 0
-
             if not pid_match and not new_window:
                 return
-
             match_reason = "pid" if pid_match else "new_window"
             found = True
             self._game_hwnd = hwnd
-            self._constrain_window(hwnd, y_offset, screen_w, game_height)
-            log_debug(f"[VERT] Match reason={match_reason} win_pid={win_pid}")
+            log_debug(f"[VERT] Game window found! hwnd=0x{hwnd:08X} "
+                      f"reason={match_reason} pid={win_pid} rect={rect}")
 
         try:
             win32gui.EnumWindows(enum_handler, None)
@@ -1522,57 +1355,93 @@ QPushButton:hover {
             pass
 
         if found:
-            # Game window found — hide loading, show return button
-            if hasattr(self, '_loading_overlay'):
-                self._loading_overlay.hide_loading()
-            self._show_landscape_return_button()
-            # Keep re-constraining for a few seconds (game may reposition itself)
-            self._constrain_count = 0
-            self._constrain_params = (y_offset, screen_w, game_height)
-            self._reconstrain_timer = QTimer(self)
-            self._reconstrain_timer.setInterval(500)
-            self._reconstrain_timer.timeout.connect(self._reconstrain_game)
-            self._reconstrain_timer.start()
+            # Game is running — raise our ad overlay ON TOP of the fullscreen game
+            log_debug(f"[VERT] Raising ad overlay as TOPMOST over game")
+            self._raise_overlays_over_game(screen_w, ad_height)
         elif retries > 0:
             QTimer.singleShot(
                 1000,
                 lambda: self._constrain_landscape_window(pid, retries=retries - 1)
             )
         else:
-            log_debug(f"[VERT] Failed to find window for PID {pid} (exe={exe_name}) after all retries")
-            log_debug(f"[VERT] Searched PIDs: {pids}")
-            # Hide loading even if window wasn't found — show return button so user isn't stuck
+            log_debug(f"[VERT] Failed to find window for PID {pid} after all retries")
             if hasattr(self, '_loading_overlay'):
                 self._loading_overlay.hide_loading()
             self._show_landscape_return_button()
 
-    def _reconstrain_game(self):
-        """Periodically re-constrain game window (games may reposition themselves)."""
-        self._constrain_count += 1
-        if self._constrain_count > 20:  # Stop after 10 seconds (20 * 500ms)
-            self._reconstrain_timer.stop()
-            return
+    def _raise_overlays_over_game(self, screen_w, ad_height):
+        """Raise ad overlay and return button as TOPMOST windows over the game."""
+        # Create a separate top-level ad overlay window that floats above the game
+        if hasattr(self, '_topmost_ad') and self._topmost_ad:
+            try:
+                self._topmost_ad.deleteLater()
+            except Exception:
+                pass
 
-        hwnd = getattr(self, '_game_hwnd', None)
-        if not hwnd:
-            self._reconstrain_timer.stop()
-            return
+        topmost_ad = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        topmost_ad.setGeometry(0, 0, screen_w, ad_height)
+        topmost_ad.setAutoFillBackground(True)
+        pal = topmost_ad.palette()
+        pal.setColor(topmost_ad.backgroundRole(), QColor(0, 0, 0))
+        topmost_ad.setPalette(pal)
 
-        try:
-            if not win32gui.IsWindow(hwnd):
-                self._reconstrain_timer.stop()
-                return
-            y_offset, screen_w, game_height = self._constrain_params
-            self._constrain_window(hwnd, y_offset, screen_w, game_height)
-        except Exception:
-            self._reconstrain_timer.stop()
+        # Create ad loop widget inside the topmost window
+        ad_widget = AdLoopWidget(topmost_ad)
+        ad_widget.setGeometry(0, 0, screen_w, ad_height)
+        ad_widget.load_ads(AIO_ROOT / "kiosk" / "vids")
+        ad_widget.show()
+
+        # Apply volume from main ad overlay
+        if self.ad_overlay:
+            try:
+                vol = self.ad_overlay._volume
+                ad_widget.set_volume(vol)
+            except Exception:
+                pass
+
+        topmost_ad.show()
+        self._topmost_ad = topmost_ad
+        self._topmost_ad_widget = ad_widget
+
+        # Force TOPMOST via Win32 API
+        self._make_overlay_topmost(topmost_ad)
+
+        # Hide the in-app ad overlay (it's behind the game anyway)
+        if self.ad_overlay:
+            self.ad_overlay.pause()
+            self.ad_overlay.hide()
+
+        # Hide loading overlay
+        if hasattr(self, '_loading_overlay'):
+            self._loading_overlay.hide_loading()
+
+        # Show return button as a separate topmost window too
+        self._show_landscape_return_button_topmost(screen_w, ad_height)
+
+        # Periodically re-assert TOPMOST in case the game fights for focus
+        self._topmost_count = 0
+        self._topmost_timer = QTimer(self)
+        self._topmost_timer.setInterval(1000)
+        self._topmost_timer.timeout.connect(self._reassert_topmost)
+        self._topmost_timer.start()
+
+    def _reassert_topmost(self):
+        """Periodically re-assert TOPMOST on our overlays."""
+        self._topmost_count += 1
+        if self._topmost_count > 30:  # Stop after 30 seconds
+            self._topmost_timer.stop()
+            return
+        if hasattr(self, '_topmost_ad') and self._topmost_ad:
+            self._make_overlay_topmost(self._topmost_ad)
+        if hasattr(self, '_topmost_return_btn') and self._topmost_return_btn:
+            self._make_overlay_topmost(self._topmost_return_btn)
 
     # --------------------------------------------------
     # Return Buttons
     # --------------------------------------------------
 
     def _show_landscape_return_button(self):
-        """Show return button for landscape games (bottom 40% region)."""
+        """Show return button for landscape games (child of main window, non-topmost)."""
         if hasattr(self, "_landscape_return_btn"):
             try:
                 self._landscape_return_btn.deleteLater()
@@ -1602,6 +1471,39 @@ QPushButton:hover {
         btn.show()
         btn.clicked.connect(self.return_to_main)
         self._landscape_return_btn = btn
+
+    def _show_landscape_return_button_topmost(self, screen_w, ad_height):
+        """Show return button as a separate TOPMOST window over the game."""
+        if hasattr(self, "_topmost_return_btn") and self._topmost_return_btn:
+            try:
+                self._topmost_return_btn.deleteLater()
+            except Exception:
+                pass
+
+        btn_win = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        btn_win.setAttribute(Qt.WA_TranslucentBackground)
+        btn_win.setGeometry(0, ad_height, 420, 100)
+
+        btn = QPushButton("Return to Platform Selection", btn_win)
+        btn.setFixedSize(360, 70)
+        btn.move(30, 15)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                font-size: 20px;
+                font-weight: bold;
+                border-radius: 35px;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+        """)
+        btn.clicked.connect(self.return_to_main)
+
+        btn_win.show()
+        self._topmost_return_btn = btn_win
+        self._make_overlay_topmost(btn_win)
 
     def _show_fullscreen_return_button(self):
         """Show return button for full-vertical games."""
@@ -1642,12 +1544,24 @@ QPushButton:hover {
         """Vertical-safe return: show returning overlay, kill game, restore UI."""
         log_debug("[VERT] Return requested")
 
-        # Stop re-constrain timer
-        if hasattr(self, '_reconstrain_timer'):
-            self._reconstrain_timer.stop()
+        # Stop topmost reassert timer
+        if hasattr(self, '_topmost_timer'):
+            self._topmost_timer.stop()
         self._game_hwnd = None
 
-        # Remove return buttons immediately
+        # Remove topmost overlays (ad + return button)
+        for attr in ("_topmost_return_btn", "_topmost_ad"):
+            try:
+                w = getattr(self, attr, None)
+                if w:
+                    w.hide()
+                    w.deleteLater()
+                    setattr(self, attr, None)
+            except Exception:
+                pass
+        self._topmost_ad_widget = None
+
+        # Remove in-app return buttons
         for attr in ("_vertical_return_btn", "_landscape_return_btn"):
             try:
                 btn = getattr(self, attr, None)
