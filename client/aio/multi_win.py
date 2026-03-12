@@ -536,7 +536,7 @@ class BlurImageButton(QWidget):
     def __init__(self, title: str, img_path: str, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setMinimumSize(220, 160)
+        self.setMinimumSize(100, 100)
 
         # Normalize path for Qt (use forward slashes)
         safe_img = (img_path or "").replace("\\", "/")
