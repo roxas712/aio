@@ -246,7 +246,7 @@ class AdLoopWidget(QWidget):
         log_debug(f"[AD] Playing video: {path.name} ({fps:.0f} fps)")
 
     def _read_frame(self):
-        """Read one frame from the video and display it."""
+        """Read one frame from the video, resize to widget, and display."""
         if self._cap is None or self._paused:
             return
 
@@ -256,17 +256,22 @@ class AdLoopWidget(QWidget):
             self._cap.set(self._cv2.CAP_PROP_POS_FRAMES, 0)
             if len(self._media_files) > 1:
                 self._next_media()
+                return
             else:
                 # Single video — loop it
                 ret, frame = self._cap.read()
                 if not ret:
                     return
 
-        if ret:
-            h, w, ch = frame.shape
-            rgb = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
-            qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
-            self._label.setPixmap(QPixmap.fromImage(qimg))
+        # Resize frame to fit widget (keeps all content visible, may letterbox)
+        lw, lh = self._label.width(), self._label.height()
+        if lw > 0 and lh > 0:
+            frame = self._cv2.resize(frame, (lw, lh), interpolation=self._cv2.INTER_AREA)
+
+        h, w, ch = frame.shape
+        rgb = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
+        qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+        self._label.setPixmap(QPixmap.fromImage(qimg))
 
     def _show_image(self, path: Path):
         """Display a static image ad."""
