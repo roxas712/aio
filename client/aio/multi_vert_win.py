@@ -1484,9 +1484,21 @@ QPushButton:hover {
             # Re-position
             win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
 
-            # Keep ad overlay on top
+            # Keep ad overlay and return button on top
             if self.ad_overlay:
                 self.ad_overlay.raise_()
+            btn = getattr(self, '_landscape_return_btn', None)
+            if btn:
+                btn.raise_()
+                try:
+                    btn_hwnd = int(btn.winId())
+                    win32gui.SetWindowPos(
+                        btn_hwnd, win32con.HWND_TOP,
+                        0, 0, 0, 0,
+                        win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+                    )
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1525,6 +1537,18 @@ QPushButton:hover {
         btn.show()
         btn.clicked.connect(self.return_to_main)
         self._landscape_return_btn = btn
+
+        # Raise button HWND above game HWND (Qt raise doesn't affect Win32 children)
+        try:
+            btn_hwnd = int(btn.winId())
+            win32gui.SetWindowPos(
+                btn_hwnd, win32con.HWND_TOP,
+                0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+            )
+            log_debug(f"[VERT] Return button raised: hwnd=0x{btn_hwnd:08X}")
+        except Exception as e:
+            log_debug(f"[VERT] Return button raise failed: {e}")
 
     def _show_landscape_return_button_topmost(self, screen_w, ad_height):
         """Show return button as a separate TOPMOST window over the game."""
