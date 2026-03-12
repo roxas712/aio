@@ -514,22 +514,38 @@ class OutlinedLabel(QLabel):
     def __init__(self, text: str, parent=None):
         super().__init__(text, parent)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWordWrap(True)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        path = QPainterPath()
         fm = self.fontMetrics()
-        text_width = fm.horizontalAdvance(self.text())
-        text_height = fm.height()
-        x = (self.width() - text_width) / 2
-        y = (self.height() + text_height) / 2 - fm.descent()
-        path.addText(x, y, self.font(), self.text())
+        flags = int(self.alignment()) | Qt.TextWordWrap
+        text_rect = painter.boundingRect(self.rect(), flags, self.text())
+
+        # Centre the text block vertically
+        dy = (self.height() - text_rect.height()) / 2 - text_rect.y()
+        painter.translate(0, dy)
+
+        # Black outline via QPainterPath per line
+        path = QPainterPath()
+        line_y = text_rect.y()
+        for line in self.text().split('\n') if '\n' in self.text() else [None]:
+            # Let Qt do the word-wrap layout; draw outline for each wrapped line
+            pass
+
+        # Simpler approach: draw text offset in 8 directions for outline
         pen = QPen(Qt.black, 2)
         painter.setPen(pen)
-        painter.drawPath(path)
+        for dx in (-2, 0, 2):
+            for dy2 in (-2, 0, 2):
+                if dx == 0 and dy2 == 0:
+                    continue
+                painter.drawText(self.rect().adjusted(dx, dy2, dx, dy2), flags, self.text())
+
+        # Foreground text
         painter.setPen(self.palette().color(self.foregroundRole()))
-        painter.drawText(self.rect(), self.alignment(), self.text())
+        painter.drawText(self.rect(), flags, self.text())
 
 
 class BlurImageButton(QWidget):
