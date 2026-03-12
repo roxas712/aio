@@ -72,6 +72,37 @@ GAME_RATIO = 0.40
 
 
 # ------------------------------------------------------
+# Neon Divider
+# ------------------------------------------------------
+
+class NeonDivider(QWidget):
+    """Glowing cyan neon line used as a visual separator."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        mid_y = h / 2.0
+
+        # Outer glow (wider, semi-transparent)
+        glow = QColor(0, 200, 255, 60)
+        p.setPen(Qt.NoPen)
+        p.setBrush(glow)
+        p.drawRect(0, 0, w, h)
+
+        # Inner bright core line (1-2 px)
+        core = QColor(0, 220, 255, 220)
+        p.setPen(QPen(core, 2))
+        p.drawLine(0, int(mid_y), w, int(mid_y))
+        p.end()
+
+
+# ------------------------------------------------------
 # Loading Overlay
 # ------------------------------------------------------
 
@@ -839,6 +870,11 @@ class VerticalMultiWindow(MainWindow):
         self.ad_overlay.raise_()
 
         self.ad_overlay.load_ads(AIO_ROOT / "kiosk" / "vids")
+
+        # Glowing neon divider between ad area and game area
+        self._neon_divider = NeonDivider(self._multi_root)
+        self._neon_divider.setGeometry(0, ad_phys - 2, _init_w, 5)
+        self._neon_divider.raise_()
 
         log_debug(f"[VERT] Window size: {self.width()}x{self.height()}, ad_phys={ad_phys}")
 
@@ -1636,6 +1672,10 @@ QPushButton:hover {
                 self.ad_overlay.raise_()
                 self.ad_overlay.resume()
 
+            # Raise the neon divider above the game
+            if hasattr(self, '_neon_divider') and self._neon_divider:
+                self._neon_divider.raise_()
+
             # Hide loading overlay
             if hasattr(self, '_loading_overlay'):
                 self._loading_overlay.hide_loading()
@@ -1700,6 +1740,10 @@ QPushButton:hover {
                 self.ad_overlay.show()
                 self.ad_overlay.raise_()
                 self.ad_overlay.resume()
+
+            # Raise neon divider above the game
+            if hasattr(self, '_neon_divider') and self._neon_divider:
+                self._neon_divider.raise_()
 
             # Clean up any previous topmost windows
             for attr in ('_topmost_ad', '_topmost_return_btn'):
