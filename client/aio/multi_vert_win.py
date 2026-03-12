@@ -691,11 +691,6 @@ class VerticalMultiWindow(MainWindow):
         # Push game content into the bottom 40% of the screen.
         # MainMenu fills the full window.  We replace the top stretch with a
         # fixed-height spacer equal to the ad area so content sits just below it.
-        #
-        # The window's logical width may exceed the physical screen width due
-        # to DPI scaling (e.g. logical=1920, physical=1080).  Pad the right
-        # margin so Qt layouts center content within the visible area only.
-        extra_right = max(0, self.width() - _init_w)
         mm_layout = self.main_menu.layout()
         if mm_layout:
             # Remove all existing stretch items
@@ -710,7 +705,7 @@ class VerticalMultiWindow(MainWindow):
             mm_layout.insertStretch(1, 1)   # top padding in game area
             mm_layout.addStretch(1)          # bottom padding in game area
             mm_layout.setSpacing(15)
-            mm_layout.setContentsMargins(20, 0, extra_right + 20, 10)
+            mm_layout.setContentsMargins(20, 0, 20, 10)
 
         # Shrink "Get Started" button for vertical and re-center it
         if hasattr(self.main_menu, 'start_btn'):
@@ -729,11 +724,11 @@ QPushButton:hover {
 }
 """)
 
-        # Tighten grid menu margins for vertical (same DPI right-margin fix)
+        # Tighten grid menu margins for vertical
         if hasattr(self, 'grid_menu'):
             grid_layout = self.grid_menu.layout()
             if grid_layout:
-                grid_layout.setContentsMargins(20, 20, extra_right + 20, 20)
+                grid_layout.setContentsMargins(20, 20, 20, 20)
                 grid_layout.setSpacing(15)
 
         # Enforce layout whenever stacked content changes
@@ -808,9 +803,7 @@ QPushButton:hover {
         if hasattr(self, 'grid_menu'):
             grid_layout = self.grid_menu.layout()
             if grid_layout:
-                screen_w, _ = self._screen_size()
-                extra_r = max(0, self.width() - screen_w)
-                grid_layout.setContentsMargins(20, 20, extra_r + 20, 20)
+                grid_layout.setContentsMargins(20, 20, 20, 20)
                 grid_layout.setSpacing(15)
 
     def closeEvent(self, event):
@@ -872,10 +865,23 @@ QPushButton:hover {
 
     def _reapply_fullscreen(self):
         screen = self.screen().geometry()
-        log_debug(f"[VERT] _reapply_fullscreen screen={screen.width()}x{screen.height()}")
+        screen_w, screen_h = screen.width(), screen.height()
+        log_debug(f"[VERT] _reapply_fullscreen screen={screen_w}x{screen_h}")
         self.setGeometry(screen)
         self.showFullScreen()
-        # resizeEvent will update margins and ad geometry
+
+        # The window's logical width may exceed the physical screen width
+        # (DPI scaling).  Constrain the stack and background to the physical
+        # screen size so Qt layouts center content within the visible area.
+        self.stack.setFixedSize(screen_w, screen_h)
+        self.bg_label.setFixedSize(screen_w, screen_h)
+
+        # Left-align so they start at x=0 (the visible left edge)
+        central_layout = self._multi_root.layout()
+        if central_layout:
+            central_layout.setAlignment(self.stack, Qt.AlignLeft | Qt.AlignTop)
+            central_layout.setAlignment(self.bg_label, Qt.AlignLeft | Qt.AlignTop)
+
         self._position_volume_button()
 
     # --------------------------------------------------
@@ -913,12 +919,9 @@ QPushButton:hover {
             if self.main_menu.layout():
                 self.main_menu.layout().invalidate()
 
-        # Re-adjust right margin for DPI scaling mismatch
-        extra_right = max(0, (self.width() or 0) - screen_w)
-        if hasattr(self, 'main_menu') and self.main_menu.layout():
-            self.main_menu.layout().setContentsMargins(20, 0, extra_right + 20, 10)
-        if hasattr(self, 'grid_menu') and self.grid_menu.layout():
-            self.grid_menu.layout().setContentsMargins(20, 20, extra_right + 20, 20)
+        # Re-constrain stack/bg to physical screen (handles orientation changes)
+        self.stack.setFixedSize(screen_w, screen_h)
+        self.bg_label.setFixedSize(screen_w, screen_h)
 
     def _enforce_bottom_layout(self):
         """Re-apply the ad spacer height in case it drifted."""
