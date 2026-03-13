@@ -1561,9 +1561,12 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        # Hide loading + Qt window; game takes over the screen
+        # Hide loading; move Qt window off-screen (NOT hide — hiding kills
+        # Qt timers/event loop which prevents the TOPMOST return button from
+        # being re-asserted over fullscreen games).
         self._loading_overlay.hide_loading()
-        self.hide()
+        self._pre_game_pos = self.pos()
+        self.move(-5000, -5000)
 
         # Store proc so we can kill it on Return
         self._game_proc = proc
@@ -1681,7 +1684,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        # Show "Returning To Menu..." overlay while things clean up
+        # Move Qt window back on-screen and show "Returning To Menu..."
+        self.move(0, 0)
         self.showFullScreen()
         self.raise_()
         self.activateWindow()
