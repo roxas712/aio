@@ -1275,8 +1275,7 @@ class GridMenu(QWidget):
             start = page_idx * self.GAMES_PER_PAGE
             page_games = self.games[start:start + self.GAMES_PER_PAGE]
             max_rows = (self.GAMES_PER_PAGE + self.COLS - 1) // self.COLS  # 3 rows
-            # Calculate a consistent card height based on full-page layout
-            # so partial pages look the same as full pages
+
             for i, game in enumerate(page_games):
                 btn = BlurImageButton(
                     title=game["title"],
@@ -1287,15 +1286,21 @@ class GridMenu(QWidget):
                 btn.setClickedCallback(lambda g=game: self.on_game_selected(g))
                 grid.addWidget(btn, i // self.COLS, i % self.COLS)
 
-            # All rows (used or not) get equal stretch so cards stay consistent
             rows_used = (len(page_games) + self.COLS - 1) // self.COLS
+
+            # Fill ALL empty cells (unused rows + unused cols on last row)
+            # with invisible spacer widgets so the grid allocates space
+            # identically to a full page.
             for r in range(max_rows):
                 grid.setRowStretch(r, 1)
-            # Fill unused columns on the last row with spacers
-            last_row_count = len(page_games) % self.COLS
-            if last_row_count != 0:
-                for c in range(last_row_count, self.COLS):
-                    grid.addWidget(QWidget(page_widget), rows_used - 1, c)
+                for c in range(self.COLS):
+                    grid.setColumnStretch(c, 1)
+                    idx = r * self.COLS + c
+                    if idx >= len(page_games):
+                        spacer = QWidget(page_widget)
+                        spacer.setAttribute(Qt.WA_TranslucentBackground)
+                        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+                        grid.addWidget(spacer, r, c)
 
             self.page_stack.addWidget(page_widget)
 
