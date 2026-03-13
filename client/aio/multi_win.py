@@ -646,7 +646,7 @@ class BlurImageButton(QWidget):
     def __init__(self, title: str, img_path: str, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setMinimumSize(100, 100)
+        self.setMinimumSize(100, 140)
 
         # Normalize path for Qt (use forward slashes)
         safe_img = (img_path or "").replace("\\", "/")
@@ -698,7 +698,14 @@ class BlurImageButton(QWidget):
         super().resizeEvent(event)
 
     def sizeHint(self):
-        return QSize(220, 180)
+        return QSize(220, 220)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, w):
+        # Keep cards roughly 4:3 aspect ratio so logos don't look smooshed
+        return int(w * 3 / 4)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -1276,9 +1283,12 @@ class GridMenu(QWidget):
                 btn.setClickedCallback(lambda g=game: self.on_game_selected(g))
                 grid.addWidget(btn, i // self.COLS, i % self.COLS)
 
-            # Push items to top so partial pages don't stretch vertically
+            # Give each used row equal stretch; push remainder to bottom
             rows_used = (len(page_games) + self.COLS - 1) // self.COLS
-            grid.setRowStretch(rows_used, 1)
+            for r in range(rows_used):
+                grid.setRowStretch(r, 1)
+            if rows_used < 4:
+                grid.setRowStretch(rows_used, 0)  # don't stretch empty row
 
             self.page_stack.addWidget(page_widget)
 
@@ -1604,8 +1614,19 @@ class MainWindow(QMainWindow):
 
         btn_win.show()
         self._game_return_win = btn_win
+        self._raise_return_topmost()
 
-        # Make it TOPMOST via Win32
+        # Re-assert TOPMOST every 500ms (D3D fullscreen games steal Z-order)
+        self._return_raise_timer = QTimer(self)
+        self._return_raise_timer.setInterval(500)
+        self._return_raise_timer.timeout.connect(self._raise_return_topmost)
+        self._return_raise_timer.start()
+
+    def _raise_return_topmost(self):
+        """Push the return-button window above all others (including D3D)."""
+        btn_win = getattr(self, '_game_return_win', None)
+        if not btn_win:
+            return
         try:
             import win32gui
             import win32con
@@ -1614,12 +1635,18 @@ class MainWindow(QMainWindow):
                 hwnd, win32con.HWND_TOPMOST,
                 0, 0, 0, 0,
                 win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+                | win32con.SWP_SHOWWINDOW
             )
         except Exception:
             pass
 
     def _hide_game_return_button(self):
-        """Remove the floating return button."""
+        """Remove the floating return button and stop its raise timer."""
+        timer = getattr(self, '_return_raise_timer', None)
+        if timer:
+            timer.stop()
+            self._return_raise_timer = None
+
         btn_win = getattr(self, '_game_return_win', None)
         if btn_win:
             try:
