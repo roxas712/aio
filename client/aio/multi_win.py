@@ -1503,7 +1503,11 @@ class MainWindow(QMainWindow):
                 ]
                 for path in firefox_candidates:
                     if os.path.exists(path):
-                        browser_cmd = [path, "-kiosk", url]
+                        browser_cmd = [
+                            path,
+                            "-new-window",
+                            url,
+                        ]
                         break
             else:
                 chrome_candidates = [
@@ -1512,11 +1516,16 @@ class MainWindow(QMainWindow):
                 ]
                 for path in chrome_candidates:
                     if os.path.exists(path):
+                        # Use --app= (chromeless) + --start-maximized instead
+                        # of --kiosk.  Kiosk mode is D3D exclusive fullscreen
+                        # which covers ALL other windows including TOPMOST,
+                        # making the return button invisible.
                         browser_cmd = [
                             path,
-                            "--kiosk",
+                            f"--app={url}",
+                            "--start-maximized",
                             f"--user-data-dir={str(CHROME_PROFILE_DIR)}",
-                            "--disable-features=DesktopPWAs,WebAppInstall,WebAppIdentityProxy",
+                            "--disable-features=DesktopPWAs,WebAppInstall,WebAppIdentityProxy,PwaInstall,PwaInstallIcon",
                             "--disable-pwa-install",
                             "--disable-infobars",
                             "--disable-extensions",
@@ -1531,7 +1540,6 @@ class MainWindow(QMainWindow):
                             "--disable-sync",
                             "--disable-notifications",
                             "--disable-popup-blocking",
-                            url,
                         ]
                         break
 
@@ -1542,6 +1550,16 @@ class MainWindow(QMainWindow):
                 return
 
             try:
+                # Kill leftover browser so flags apply on a fresh instance
+                kill_exe = "firefox.exe" if title_lower == "classic online" else "chrome.exe"
+                try:
+                    subprocess.run(
+                        ["taskkill", "/IM", kill_exe, "/F"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    import time; time.sleep(1)
+                except Exception:
+                    pass
                 try:
                     CHROME_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
                 except Exception:
@@ -1602,14 +1620,18 @@ class MainWindow(QMainWindow):
                 background-color: #c82333;
             }
         """)
-        btn.enterEvent = lambda e, b=btn: (
-            b.setText("Return to Platform Selection"),
-            b.setFixedSize(380, 60),
-        )
-        btn.leaveEvent = lambda e, b=btn: (
-            b.setText("Return"),
-            b.setFixedSize(160, 60),
-        )
+        def _on_enter(event, b=btn, w=btn_win):
+            b.setText("Return to Platform Selection")
+            b.setFixedSize(380, 60)
+            w.setFixedWidth(500)
+
+        def _on_leave(event, b=btn, w=btn_win):
+            b.setText("Return")
+            b.setFixedSize(160, 60)
+            w.setFixedWidth(250)
+
+        btn.enterEvent = _on_enter
+        btn.leaveEvent = _on_leave
         btn.clicked.connect(self._kill_game_and_return)
 
         btn_win.show()
