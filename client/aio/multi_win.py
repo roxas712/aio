@@ -647,7 +647,7 @@ class BlurImageButton(QWidget):
     def __init__(self, title: str, img_path: str, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setMinimumSize(100, 140)
+        self.setMinimumSize(120, 80)
 
         # Normalize path for Qt (use forward slashes)
         safe_img = (img_path or "").replace("\\", "/")
@@ -699,14 +699,14 @@ class BlurImageButton(QWidget):
         super().resizeEvent(event)
 
     def sizeHint(self):
-        return QSize(220, 220)
+        return QSize(280, 160)
 
     def hasHeightForWidth(self):
         return True
 
     def heightForWidth(self, w):
-        # Keep cards roughly 4:3 aspect ratio so logos don't look smooshed
-        return int(w * 3 / 4)
+        # 16:9 aspect ratio — fits landscape grids without looking smooshed
+        return int(w * 9 / 16)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -1638,9 +1638,9 @@ class MainWindow(QMainWindow):
         self._game_return_win = btn_win
         self._raise_return_topmost()
 
-        # Re-assert TOPMOST every 500ms (D3D fullscreen games steal Z-order)
-        self._return_raise_timer = QTimer(self)
-        self._return_raise_timer.setInterval(500)
+        # Re-assert TOPMOST every 250ms (games steal Z-order aggressively)
+        self._return_raise_timer = QTimer()  # no parent — survives main window off-screen
+        self._return_raise_timer.setInterval(250)
         self._return_raise_timer.timeout.connect(self._raise_return_topmost)
         self._return_raise_timer.start()
 
@@ -1652,13 +1652,17 @@ class MainWindow(QMainWindow):
         try:
             import win32gui
             import win32con
+            import ctypes
             hwnd = int(btn_win.winId())
+            # Force TOPMOST Z-order
             win32gui.SetWindowPos(
                 hwnd, win32con.HWND_TOPMOST,
-                0, 0, 0, 0,
-                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+                10, 10, 0, 0,
+                win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
                 | win32con.SWP_SHOWWINDOW
             )
+            # Also ensure it's shown (SW_SHOWNOACTIVATE = 4)
+            ctypes.windll.user32.ShowWindow(hwnd, 4)
         except Exception:
             pass
 
