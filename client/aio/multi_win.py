@@ -1565,16 +1565,11 @@ class MainWindow(QMainWindow):
         self._loading_overlay.hide_loading()
         self.hide()
 
+        # Store proc so we can kill it on Return
+        self._game_proc = proc
+
         # Show floating TOPMOST return button over the game
         self._show_game_return_button()
-
-        # Poll for game exit, then return to menu
-        self._current_game_title = title
-        self._game_proc = proc
-        self._game_poll_timer = QTimer(self)
-        self._game_poll_timer.setInterval(2000)
-        self._game_poll_timer.timeout.connect(self._check_game_exited)
-        self._game_poll_timer.start()
 
     def _show_game_return_button(self):
         """Show a floating TOPMOST return button over the fullscreen game."""
@@ -1659,10 +1654,13 @@ class MainWindow(QMainWindow):
             self._game_return_win = None
 
     def _kill_game_and_return(self):
-        """Kill the running game process and return to the menu."""
+        """Kill the running game, show 'Returning' overlay, restore menu."""
+        # Hide the return button immediately
+        self._hide_game_return_button()
+
+        # Kill by launcher PID (tree kill)
         proc = getattr(self, '_game_proc', None)
         if proc:
-            # Kill entire process tree (Chrome/Firefox have many children)
             try:
                 subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
@@ -1673,7 +1671,7 @@ class MainWindow(QMainWindow):
                 pass
             self._game_proc = None
 
-        # Also kill any lingering browser/game processes by name
+        # Kill any lingering browser processes by name
         for exe in ("chrome.exe", "firefox.exe"):
             try:
                 subprocess.run(
@@ -1683,66 +1681,33 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        # Brief pause so windows actually close before we show the menu
-        QTimer.singleShot(500, self._return_to_menu)
+        # Show "Returning To Menu..." overlay while things clean up
+        self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
+        if hasattr(self, '_loading_overlay'):
+            self._loading_overlay.show_loading("Returning To Menu...")
+            self._loading_overlay.raise_()
 
-    def _check_game_exited(self):
-        """Poll whether the launched game process has exited."""
-        proc = getattr(self, '_game_proc', None)
-        if proc is None:
-            self._return_to_menu()
-            return
+        # Restore full menu UI after a visible delay
+        QTimer.singleShot(1500, self._finish_return_to_menu)
 
-        # Check if the process tree is still alive.
-        # Browser launchers (chrome.exe) exit immediately while the real
-        # browser keeps running, so proc.poll() alone is unreliable.
-        # Instead, check if ANY process with the same exe name is running.
-        still_running = False
-        if proc.poll() is None:
-            still_running = True
-        else:
-            # Launcher exited — check for lingering browser/game by exe name
-            game_title = getattr(self, '_current_game_title', '') or ''
-            exe_names = set()
-            # Detect browser games
-            if game_title.lower() == 'classic online':
-                exe_names.add('firefox.exe')
-            elif proc.args and any('chrome' in str(a).lower() for a in proc.args):
-                exe_names.add('chrome.exe')
-            # Also try to get exe name from the original command
-            if proc.args and len(proc.args) > 0:
-                exe_names.add(os.path.basename(str(proc.args[0])).lower())
-
-            if exe_names:
-                try:
-                    for p in psutil.process_iter(['name']):
-                        if p.info['name'] and p.info['name'].lower() in exe_names:
-                            still_running = True
-                            break
-                except Exception:
-                    pass
-
-        if not still_running:
-            self._game_proc = None
-            self._return_to_menu()
-
-    def _return_to_menu(self):
-        """Common logic: stop polling, hide return button, show menu."""
-        if hasattr(self, '_game_poll_timer'):
-            self._game_poll_timer.stop()
-
-        self._hide_game_return_button()
-
+    def _finish_return_to_menu(self):
+        """Restore full menu UI after the returning overlay."""
         try:
             send_status_to_server("menu")
         except Exception:
             pass
 
-        # Show menu again
+        # Show menu
         self.stack.show()
         self.showFullScreen()
         self.raise_()
         self.activateWindow()
+
+        # Hide the loading overlay
+        if hasattr(self, '_loading_overlay'):
+            self._loading_overlay.hide_loading()
     def __init__(self):
         super().__init__()
         # Register this kiosk menu process with the watchdog
