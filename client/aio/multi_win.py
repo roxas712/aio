@@ -1660,17 +1660,18 @@ class MainWindow(QMainWindow):
         """Kill the running game process and return to the menu."""
         proc = getattr(self, '_game_proc', None)
         if proc:
+            # Kill entire process tree (Chrome/Firefox have many children)
             try:
-                proc.terminate()
-                proc.wait(timeout=3)
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
             except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+                pass
             self._game_proc = None
 
-        # Also kill browser processes that might be lingering
+        # Also kill any lingering browser/game processes by name
         for exe in ("chrome.exe", "firefox.exe"):
             try:
                 subprocess.run(
@@ -1680,7 +1681,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        self._return_to_menu()
+        # Brief pause so windows actually close before we show the menu
+        QTimer.singleShot(500, self._return_to_menu)
 
     def _check_game_exited(self):
         """Poll whether the launched game process has exited."""
