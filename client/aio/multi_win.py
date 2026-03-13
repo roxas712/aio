@@ -1817,9 +1817,9 @@ class MainWindow(QMainWindow):
         self.inactivity_timer.timeout.connect(self.return_to_main)
         self.inactivity_timer.start()
 
-        # Grid idle timer (10 seconds on grid view)
+        # Grid idle timer — return to main menu after inactivity on grid
         self.grid_idle_timer = QTimer(self)
-        self.grid_idle_timer.setInterval(30_000)  # 30 seconds
+        self.grid_idle_timer.setInterval(120_000)  # 2 minutes
         self.grid_idle_timer.setSingleShot(True)
         self.grid_idle_timer.timeout.connect(self._grid_idle_return)
 
@@ -2077,6 +2077,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "grid_menu"):
             self.stack.setCurrentWidget(self.grid_menu)
             self.grid_idle_timer.start()
+            # Reset the global inactivity timer too
+            self.inactivity_timer.start(300_000)
         self._sync_tap_zone_visibility()
 
     def launch_game(self, game: Dict[str, Any]):
