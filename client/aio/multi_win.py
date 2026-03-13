@@ -10,6 +10,7 @@ from functools import partial
 from typing import Dict, Any
 from pathlib import Path
 import time
+import psutil
 # Ensure QWidget is defined before use, even if execution happens before imports settle
 from PyQt5.QtWidgets import QWidget
 
@@ -1568,6 +1569,7 @@ class MainWindow(QMainWindow):
         self._show_game_return_button()
 
         # Poll for game exit, then return to menu
+        self._current_game_title = title
         self._game_proc = proc
         self._game_poll_timer = QTimer(self)
         self._game_poll_timer.setInterval(2000)
@@ -1687,7 +1689,40 @@ class MainWindow(QMainWindow):
     def _check_game_exited(self):
         """Poll whether the launched game process has exited."""
         proc = getattr(self, '_game_proc', None)
-        if proc is None or proc.poll() is not None:
+        if proc is None:
+            self._return_to_menu()
+            return
+
+        # Check if the process tree is still alive.
+        # Browser launchers (chrome.exe) exit immediately while the real
+        # browser keeps running, so proc.poll() alone is unreliable.
+        # Instead, check if ANY process with the same exe name is running.
+        still_running = False
+        if proc.poll() is None:
+            still_running = True
+        else:
+            # Launcher exited — check for lingering browser/game by exe name
+            game_title = getattr(self, '_current_game_title', '') or ''
+            exe_names = set()
+            # Detect browser games
+            if game_title.lower() == 'classic online':
+                exe_names.add('firefox.exe')
+            elif proc.args and any('chrome' in str(a).lower() for a in proc.args):
+                exe_names.add('chrome.exe')
+            # Also try to get exe name from the original command
+            if proc.args and len(proc.args) > 0:
+                exe_names.add(os.path.basename(str(proc.args[0])).lower())
+
+            if exe_names:
+                try:
+                    for p in psutil.process_iter(['name']):
+                        if p.info['name'] and p.info['name'].lower() in exe_names:
+                            still_running = True
+                            break
+                except Exception:
+                    pass
+
+        if not still_running:
             self._game_proc = None
             self._return_to_menu()
 
