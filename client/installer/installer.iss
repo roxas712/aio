@@ -1,7 +1,7 @@
 ; Inno Setup script for AIO v2 Windows client (agent + kiosk + embedded Python + platform installers)
 
 #define AppName "AIO Game Terminal v2"
-#define AppVersion "0.2.0"
+#define AppVersion "2.0.0"
 #define Publisher "PGOC"
 #define PythonTargetDir "C:\\Program Files\\Python314"
 #define PythonExePath "C:\\Program Files\\Python314\\python.exe"
@@ -680,7 +680,7 @@ begin
     '$p = ''' + ExpandConstant('{app}\config\client.json') + '''' + #13#10 +
     'if (!(Test-Path $p)) {' + #13#10 +
     '  $verPath = ''' + ExpandConstant('{app}\config\version.json') + '''' + #13#10 +
-    '  $ver = "1.17"' + #13#10 +
+    '  $ver = "2.0.0"' + #13#10 +
     '  if (Test-Path $verPath) {' + #13#10 +
     '    try {' + #13#10 +
     '      $j = Get-Content $verPath -Raw | ConvertFrom-Json' + #13#10 +
