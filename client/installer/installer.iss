@@ -137,9 +137,9 @@ Filename: "{#PythonExePath}"; \
 
 ; 3) Install required Python packages (PyQt5, PyQtWebEngine, psutil, requests, websockets, pywin32)
 Filename: "{#PythonExePath}"; \
-    Parameters: "-m pip install PyQt5 PyQtWebEngine psutil requests websockets pywin32"; \
+    Parameters: "-m pip install PyQt5 PyQtWebEngine psutil requests websockets pywin32 opencv-python"; \
     Flags: runhidden waituntilterminated; \
-    StatusMsg: "Installing Python dependencies (PyQt5, PyQtWebEngine, psutil, requests, websockets, pywin32)..."; \
+    StatusMsg: "Installing Python dependencies (PyQt5, PyQtWebEngine, psutil, requests, websockets, pywin32, opencv-python)..."; \
     Check: PythonInstalled
 
 
