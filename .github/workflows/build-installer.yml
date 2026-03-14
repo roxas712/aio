@@ -106,14 +106,34 @@ jobs:
       - name: Download nssm
         shell: pwsh
         run: |
-          $nssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
+          # Try pgoc.ai mirror first, then nssm.cc as fallback
+          $mirrors = @(
+            "https://pgoc.ai/installers/nssm-2.24.zip",
+            "https://nssm.cc/release/nssm-2.24.zip"
+          )
           $zipPath = "$env:TEMP\nssm.zip"
           $extractPath = "$env:TEMP\nssm-extract"
+          $downloaded = $false
 
-          Invoke-WebRequest -Uri $nssmUrl -OutFile $zipPath
+          foreach ($url in $mirrors) {
+            try {
+              Write-Host "Trying $url ..."
+              Invoke-WebRequest -Uri $url -OutFile $zipPath -TimeoutSec 30
+              $downloaded = $true
+              Write-Host "Downloaded from $url"
+              break
+            } catch {
+              Write-Warning "Failed from $url : $_"
+            }
+          }
+
+          if (-not $downloaded) {
+            throw "Could not download nssm from any mirror."
+          }
+
           Expand-Archive $zipPath -DestinationPath $extractPath -Force
           Copy-Item "$extractPath\nssm-2.24\win64\nssm.exe" "C:\AIOv2\tools\"
-          Write-Host "nssm.exe downloaded."
+          Write-Host "nssm.exe staged."
 
       # ---------------------------------------------------------------
       # Compile installer with Inno Setup
