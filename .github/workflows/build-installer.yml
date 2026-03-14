@@ -101,42 +101,27 @@ jobs:
           Write-Host "agent.exe built successfully."
 
       # ---------------------------------------------------------------
-      # Download nssm.exe
+      # Install nssm via Chocolatey (bundled into installer)
       # ---------------------------------------------------------------
-      - name: Download nssm
+      - name: Install nssm
         shell: pwsh
         run: |
-          # Try direct exe from pgoc.ai first, then zip, then nssm.cc
-          $destExe = "C:\AIOv2\tools\nssm.exe"
-
-          # Attempt 1: direct exe download from pgoc.ai
-          try {
-            Write-Host "Trying pgoc.ai/installers/nssm.exe ..."
-            Invoke-WebRequest -Uri "https://pgoc.ai/installers/nssm.exe" -OutFile $destExe -TimeoutSec 30
-            Write-Host "Downloaded nssm.exe directly."
-            exit 0
-          } catch { Write-Warning "Direct exe failed: $_" }
-
-          # Attempt 2: zip from pgoc.ai
-          $zipPath = "$env:TEMP\nssm.zip"
-          $extractPath = "$env:TEMP\nssm-extract"
-          $zipMirrors = @(
-            "https://pgoc.ai/installers/nssm-2.24.zip",
-            "https://nssm.cc/release/nssm-2.24.zip"
-          )
-
-          foreach ($url in $zipMirrors) {
-            try {
-              Write-Host "Trying $url ..."
-              Invoke-WebRequest -Uri $url -OutFile $zipPath -TimeoutSec 30
-              Expand-Archive $zipPath -DestinationPath $extractPath -Force
-              Copy-Item "$extractPath\nssm-2.24\win64\nssm.exe" $destExe
-              Write-Host "Downloaded and extracted from $url"
-              exit 0
-            } catch { Write-Warning "Failed from $url : $_" }
+          choco install nssm -y --no-progress
+          # Chocolatey installs nssm to its bin dir; copy to staging
+          $nssmPath = (Get-Command nssm -ErrorAction SilentlyContinue).Source
+          if ($nssmPath) {
+            Copy-Item $nssmPath "C:\AIOv2\tools\nssm.exe" -Force
+            Write-Host "nssm.exe staged from Chocolatey: $nssmPath"
+          } else {
+            # Fallback: check common choco path
+            $chocoPath = "C:\ProgramData\chocolatey\bin\nssm.exe"
+            if (Test-Path $chocoPath) {
+              Copy-Item $chocoPath "C:\AIOv2\tools\nssm.exe" -Force
+              Write-Host "nssm.exe staged from $chocoPath"
+            } else {
+              throw "nssm.exe not found after Chocolatey install"
+            }
           }
-
-          throw "Could not download nssm from any source."
 
       # ---------------------------------------------------------------
       # Compile installer with Inno Setup
