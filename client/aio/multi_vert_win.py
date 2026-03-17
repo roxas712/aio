@@ -1070,16 +1070,27 @@ QPushButton:hover {
         if mm_layout:
             mm_layout.setContentsMargins(0, 0, 0, 0)
 
-        screen_w, _ = self._screen_size()
+        screen_w, screen_h = self._screen_size()
+        game_h = int(screen_h * GAME_RATIO)
+
+        # Scale card sizes relative to the game area so they fit any resolution
+        # Target: cards use ~70% of game area height, container ~80%
+        center_h = int(game_h * 0.55)
+        center_w = int(center_h * 0.72)  # ~5:7 aspect ratio
+        side_h = int(center_h * 0.80)
+        side_w = int(side_h * 0.72)
+        container_h = int(game_h * 0.70)
+        card_gap = int(-center_w * 0.18)
+
         new_carousel = CarouselWidget(
             games=self.games,
             on_select=self.main_menu._game_selected,
             parent=self.main_menu,
-            center_size=QSize(300, 420),
-            side_size=QSize(240, 340),
-            container_size=QSize(screen_w, 480),
+            center_size=QSize(center_w, center_h),
+            side_size=QSize(side_w, side_h),
+            container_size=QSize(screen_w, container_h),
             num_visible=5,
-            gap=-55,
+            gap=card_gap,
         )
         # Fill full width — zero all padding so container sits at x=0
         new_carousel.layout().setContentsMargins(0, 0, 0, 0)
