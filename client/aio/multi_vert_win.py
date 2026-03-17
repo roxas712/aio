@@ -1070,27 +1070,19 @@ QPushButton:hover {
         if mm_layout:
             mm_layout.setContentsMargins(0, 0, 0, 0)
 
-        screen_w, screen_h = self._screen_size()
-        game_h = int(screen_h * GAME_RATIO)
+        screen_w, _ = self._screen_size()
 
-        # Scale card sizes relative to the game area so they fit any resolution
-        # Target: cards use ~70% of game area height, container ~80%
-        center_h = int(game_h * 0.55)
-        center_w = int(center_h * 0.72)  # ~5:7 aspect ratio
-        side_h = int(center_h * 0.80)
-        side_w = int(side_h * 0.72)
-        container_h = int(game_h * 0.70)
-        card_gap = int(-center_w * 0.18)
-
+        # Vertical kiosk is always 1080x1920 portrait.
+        # Game area = bottom 40% = 768px.  Card sizes tuned for that.
         new_carousel = CarouselWidget(
             games=self.games,
             on_select=self.main_menu._game_selected,
             parent=self.main_menu,
-            center_size=QSize(center_w, center_h),
-            side_size=QSize(side_w, side_h),
-            container_size=QSize(screen_w, container_h),
+            center_size=QSize(300, 420),
+            side_size=QSize(240, 340),
+            container_size=QSize(screen_w, 480),
             num_visible=5,
-            gap=card_gap,
+            gap=-55,
         )
         # Fill full width — zero all padding so container sits at x=0
         new_carousel.layout().setContentsMargins(0, 0, 0, 0)
@@ -2393,6 +2385,16 @@ if __name__ == "__main__":
     os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
     os.environ.setdefault("QT_SCALE_FACTOR", "1")
     os.environ.setdefault("QT_DEVICE_PIXEL_RATIO", "1")
+
+    # Tell Windows we handle DPI ourselves — ensures screen().geometry()
+    # returns true physical pixels (1080x1920) not DPI-scaled values.
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
     from PyQt5.QtCore import Qt as _Qt
     QApplication.setAttribute(_Qt.AA_DisableHighDpiScaling, True)
