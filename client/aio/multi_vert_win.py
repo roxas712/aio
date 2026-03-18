@@ -1070,19 +1070,31 @@ QPushButton:hover {
         if mm_layout:
             mm_layout.setContentsMargins(0, 0, 0, 0)
 
-        screen_w, _ = self._screen_size()
+        screen_w, screen_h = self._screen_size()
+        game_h = int(screen_h * GAME_RATIO)
 
-        # Vertical kiosk is always 1080x1920 portrait.
-        # Game area = bottom 40% = 768px.  Card sizes tuned for that.
+        # Scale card sizes to the game area height so they look correct
+        # on any resolution (1080x1920, 2160x3840 4K, etc.)
+        center_h = int(game_h * 0.55)
+        center_w = int(center_h * 0.72)
+        side_h = int(center_h * 0.80)
+        side_w = int(side_h * 0.72)
+        container_h = int(game_h * 0.65)
+        card_gap = int(-center_w * 0.18)
+
+        log_debug(f"[VERT] Carousel sizing: screen={screen_w}x{screen_h} "
+                  f"game_h={game_h} center={center_w}x{center_h} "
+                  f"side={side_w}x{side_h} container_h={container_h}")
+
         new_carousel = CarouselWidget(
             games=self.games,
             on_select=self.main_menu._game_selected,
             parent=self.main_menu,
-            center_size=QSize(300, 420),
-            side_size=QSize(240, 340),
-            container_size=QSize(screen_w, 480),
+            center_size=QSize(center_w, center_h),
+            side_size=QSize(side_w, side_h),
+            container_size=QSize(screen_w, container_h),
             num_visible=5,
-            gap=-55,
+            gap=card_gap,
         )
         # Fill full width — zero all padding so container sits at x=0
         new_carousel.layout().setContentsMargins(0, 0, 0, 0)
