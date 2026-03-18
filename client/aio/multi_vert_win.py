@@ -140,19 +140,23 @@ class LoadingOverlay(QWidget):
         # Background
         p.fillRect(self.rect(), self._BG)
 
-        # --- Centered text (upper third of overlay) ---
-        font = QFont("Arial", 32, QFont.Bold)
+        # Scale font size to overlay height (baseline: 1536px game area)
+        font_sz = max(28, int(h * 0.04))
+        font = QFont("Arial", font_sz, QFont.Bold)
         p.setFont(font)
         p.setPen(QColor(255, 255, 255))
-        text_rect_h = 50
-        text_y = int(h * 0.35) - text_rect_h
-        p.drawText(0, text_y, w, text_rect_h, Qt.AlignHCenter | Qt.AlignBottom, self._text)
+
+        # --- Centered text + bar at vertical center of overlay ---
+        text_rect_h = int(h * 0.12)
+        center_y = int(h * 0.40)
+        text_y = center_y - text_rect_h
+        p.drawText(0, text_y, w, text_rect_h, Qt.AlignHCenter | Qt.AlignVCenter, self._text)
 
         # --- Loading bar ---
         bar_w = int(w * 0.70)
-        bar_h = 8
+        bar_h = max(6, int(h * 0.008))
         bar_x = (w - bar_w) // 2
-        bar_y = int(h * 0.35) + 10
+        bar_y = center_y + int(h * 0.02)
 
         # Track background (dark grey rounded rect)
         p.setPen(Qt.NoPen)
