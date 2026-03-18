@@ -2125,8 +2125,11 @@ QPushButton:hover {
             except Exception:
                 pass
 
+        s = self._btn_scale()
+        btn_w, btn_h = int(110 * s), int(50 * s)
+
         btn = QPushButton("Return", self)
-        btn.setFixedSize(160, 70)
+        btn.setFixedSize(btn_w, btn_h)
         btn.setStyleSheet(self._return_btn_style())
         btn.enterEvent = lambda e, b=btn: self._expand_return_btn(b)
         btn.leaveEvent = lambda e, b=btn: self._collapse_return_btn(b)
@@ -2135,7 +2138,7 @@ QPushButton:hover {
         _, screen_h = self._screen_size()
         ad_height = int(screen_h * AD_RATIO)
 
-        btn.move(30, ad_height - 70 - 15)
+        btn.move(int(20 * s), ad_height - btn_h - int(10 * s))
         btn.raise_()
         btn.show()
         self._landscape_return_btn = btn
@@ -2148,13 +2151,17 @@ QPushButton:hover {
             except Exception:
                 pass
 
+        s = self._btn_scale()
+        btn_w, btn_h = int(110 * s), int(50 * s)
+        container_w, container_h = int(350 * s), int(70 * s)
+
         btn_win = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         btn_win.setAttribute(Qt.WA_TranslucentBackground)
-        btn_win.setGeometry(0, ad_height - 100, 500, 100)
+        btn_win.setGeometry(0, ad_height - container_h, container_w, container_h)
 
         btn = QPushButton("Return", btn_win)
-        btn.setFixedSize(160, 70)
-        btn.move(30, 15)
+        btn.setFixedSize(btn_w, btn_h)
+        btn.move(int(20 * s), int(10 * s))
         btn.setStyleSheet(self._return_btn_style())
         btn.enterEvent = lambda e, b=btn, w=btn_win: self._expand_return_btn(b, w)
         btn.leaveEvent = lambda e, b=btn, w=btn_win: self._collapse_return_btn(b, w)
@@ -2180,13 +2187,17 @@ QPushButton:hover {
                     pass
                 setattr(self, attr, None)
 
+        s = self._btn_scale()
+        btn_w, btn_h = int(110 * s), int(50 * s)
+        container_w, container_h = int(350 * s), int(70 * s)
+
         btn_win = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         btn_win.setAttribute(Qt.WA_TranslucentBackground)
-        btn_win.setGeometry(0, 0, 500, 100)
+        btn_win.setGeometry(0, 0, container_w, container_h)
 
         btn = QPushButton("Return", btn_win)
-        btn.setFixedSize(160, 70)
-        btn.move(30, 15)
+        btn.setFixedSize(btn_w, btn_h)
+        btn.move(int(20 * s), int(10 * s))
         btn.setStyleSheet(self._return_btn_style())
         btn.enterEvent = lambda e, b=btn, w=btn_win: self._expand_return_btn(b, w)
         btn.leaveEvent = lambda e, b=btn, w=btn_win: self._collapse_return_btn(b, w)
@@ -2201,34 +2212,42 @@ QPushButton:hover {
     # Vertical Return Override
     # --- Return button helpers -------------------------------------------
 
-    @staticmethod
-    def _return_btn_style():
-        return """
-            QPushButton {
+    def _btn_scale(self):
+        """Return a scale factor for button sizing based on screen width.
+        Baseline is 1080px wide.  On wider screens buttons stay proportional."""
+        w, _ = self._screen_size()
+        return max(0.5, min(1.5, w / 1080.0))
+
+    def _return_btn_style(self):
+        s = self._btn_scale()
+        fs = max(12, int(16 * s))
+        r = max(15, int(25 * s))
+        return f"""
+            QPushButton {{
                 background-color: #dc3545;
                 color: white;
-                font-size: 20px;
+                font-size: {fs}px;
                 font-weight: bold;
-                border-radius: 35px;
-            }
-            QPushButton:hover {
+                border-radius: {r}px;
+            }}
+            QPushButton:hover {{
                 background-color: #c82333;
-            }
+            }}
         """
 
-    @staticmethod
-    def _expand_return_btn(btn, container=None):
+    def _expand_return_btn(self, btn, container=None):
+        s = self._btn_scale()
         btn.setText("Return to Platform Selection")
-        btn.setFixedSize(400, 70)
+        btn.setFixedSize(int(280 * s), int(50 * s))
         if container:
-            container.setFixedWidth(500)
+            container.setFixedWidth(int(350 * s))
 
-    @staticmethod
-    def _collapse_return_btn(btn, container=None):
+    def _collapse_return_btn(self, btn, container=None):
+        s = self._btn_scale()
         btn.setText("Return")
-        btn.setFixedSize(160, 70)
+        btn.setFixedSize(int(110 * s), int(50 * s))
         if container:
-            container.setFixedWidth(250)
+            container.setFixedWidth(int(180 * s))
 
     # --------------------------------------------------
 
