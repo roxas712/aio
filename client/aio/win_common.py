@@ -685,19 +685,21 @@ def force_display_orientation(target_orientation: int):
             dm.dmPelsWidth, dm.dmPelsHeight = dm.dmPelsHeight, dm.dmPelsWidth
 
         # --- Method 1: ChangeDisplaySettingsExW with device name ---
-        # This is more reliable on NVIDIA than ChangeDisplaySettingsW(NULL)
+        # CDS_UPDATEREGISTRY (1) makes the change persistent in the registry
+        # so NVIDIA driver can't revert it on next mode-set.
+        CDS_UPDATEREGISTRY = 1
         if device_name:
             result = user32.ChangeDisplaySettingsExW(
                 device_name,
                 ctypes.byref(dm),
                 None,   # hwnd
-                0,      # flags (CDS_UPDATEREGISTRY=1 makes it persistent)
+                CDS_UPDATEREGISTRY,
                 None,   # lParam
             )
             print(f"[INFO] ChangeDisplaySettingsExW({device_name}, orient={try_orientation}) "
                   f"returned {result}")
         else:
-            result = user32.ChangeDisplaySettingsW(ctypes.byref(dm), 0)
+            result = user32.ChangeDisplaySettingsW(ctypes.byref(dm), CDS_UPDATEREGISTRY)
             print(f"[INFO] ChangeDisplaySettingsW(orient={try_orientation}) "
                   f"returned {result}")
 

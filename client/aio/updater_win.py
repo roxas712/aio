@@ -452,6 +452,35 @@ def configure_system() -> None:
 
     log("[INFO] Touch settings reverted to defaults.")
 
+    # --- Reset touch calibration data ---
+    # Stale calibration from a previous display rotation can cause
+    # inverted touch axes (right→up, left→down).  Removing the
+    # calibration data and restarting the touch service forces Windows
+    # to re-derive coordinates from the current display orientation.
+    try:
+        for digimon_idx in ("0", "1", "2"):
+            key_path = rf"SOFTWARE\Microsoft\Wisp\Pen\Digimon\{digimon_idx}"
+            try:
+                key = winreg.OpenKeyEx(
+                    winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE,
+                )
+                try:
+                    winreg.DeleteValue(key, "Calibration Data")
+                    log(f"[INFO] Removed touch calibration data from {key_path}")
+                except FileNotFoundError:
+                    pass
+                winreg.CloseKey(key)
+            except Exception:
+                pass
+        # Restart the touch input service so it picks up fresh calibration
+        subprocess.run(
+            ["powershell", "-Command", "Restart-Service TabletInputService -Force -ErrorAction SilentlyContinue"],
+            capture_output=True, timeout=10,
+        )
+        log("[INFO] Touch input service restarted.")
+    except Exception as e:
+        log(f"[WARN] Touch calibration reset failed (non-fatal): {e}")
+
     # --- Install Git LFS if not present ---
     try:
         result = subprocess.run(

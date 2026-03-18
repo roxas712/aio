@@ -981,6 +981,15 @@ QPushButton:hover {{
         self._heartbeat_timer.timeout.connect(self._heartbeat_ping)
         self._heartbeat_timer.start()
 
+        # Background portrait re-assertion — NVIDIA drivers may revert the
+        # rotation several seconds after boot.  Keep re-applying portrait
+        # orientation for the first 30 seconds to catch any reversions.
+        self._portrait_checks_remaining = 15  # 15 × 2s = 30s
+        self._portrait_timer = QTimer(self)
+        self._portrait_timer.setInterval(2000)
+        self._portrait_timer.timeout.connect(self._reassert_portrait)
+        self._portrait_timer.start()
+
         log_debug(f"[VERT] __init__ complete. games={len(self.games) if self.games else 0}, "
                   f"has_carousel={hasattr(self.main_menu, 'carousel')}")
 
@@ -2460,6 +2469,29 @@ QPushButton:hover {
     def _hide_loading_overlay(self):
         if hasattr(self, '_loading_overlay'):
             self._loading_overlay.hide_loading()
+
+    # -- Portrait re-assertion (fights NVIDIA driver revert) ----------
+    def _reassert_portrait(self):
+        """Re-check display orientation and force portrait if NVIDIA reverted it."""
+        self._portrait_checks_remaining -= 1
+        if self._portrait_checks_remaining <= 0:
+            self._portrait_timer.stop()
+            log_debug("[VERT] Portrait assertion period ended")
+            return
+
+        try:
+            from win_common import _get_display_orientation, force_portrait as _fp
+            dm = _get_display_orientation()
+            if dm and dm.dmPelsWidth > dm.dmPelsHeight:
+                log_debug(f"[VERT] Display reverted to landscape ({dm.dmPelsWidth}x{dm.dmPelsHeight}) "
+                          f"— re-forcing portrait")
+                _fp()
+                # After rotation, re-apply fullscreen and layout
+                QTimer.singleShot(1500, self._reapply_fullscreen)
+            elif dm:
+                log_debug(f"[VERT] Portrait OK: {dm.dmPelsWidth}x{dm.dmPelsHeight}")
+        except Exception as e:
+            log_debug(f"[VERT] Portrait check error: {e}")
 
     # -- Periodic heartbeat -----------------------------------------
     def _heartbeat_ping(self):
