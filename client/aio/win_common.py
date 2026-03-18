@@ -225,8 +225,8 @@ DEFAULT_GAMES: List[Dict[str, Any]] = [
     },
     {
         "title": "Fire Phoenix",
-        "type": "exe",
-        "target": r"C:\Program Files (x86)\FirePhoenix\FirePhoenix.exe",
+        "type": "url",
+        "target": "https://fpc-mob.com",
         "img": str(KIOSK_DIR / "img" / "firephoenix.png"),
         "orientation": "landscape",
     },
@@ -246,8 +246,8 @@ DEFAULT_GAMES: List[Dict[str, Any]] = [
     },
     {
         "title": "Golden Dragon City",
-        "type": "exe",
-        "target": r"C:\Program Files (x86)\PlayGD\playgd.exe",
+        "type": "url",
+        "target": "https://playgd.city",
         "img": str(KIOSK_DIR / "img" / "goldendragoncity.png"),
         "orientation": "landscape",
     },
@@ -793,67 +793,12 @@ def force_landscape():
 
 
 def configure_touch_as_mouse():
-    """Configure Windows to treat touch input as mouse/cursor input.
+    """No-op — touch settings reverted to Windows defaults.
 
-    Forces Windows to:
-    1. Show a mouse cursor that follows touch position
-    2. Disable touch visual feedback (ripple animation)
-    3. Disable press-and-hold right-click gesture
-    4. Disable edge swipe gestures
-    This is needed for game EXEs that only handle WM_MOUSE* messages.
+    All games now launch in the browser, so native Windows touch
+    handling works correctly without registry overrides.
     """
-    if winreg is None:
-        return
-
-    settings = [
-        # Disable touch contact/gesture visualization (ripple on tap)
-        (winreg.HKEY_CURRENT_USER,
-         r"Control Panel\Cursors",
-         [("ContactVisualization", 0), ("GestureVisualization", 0)]),
-        # Disable press-and-hold for right-click
-        (winreg.HKEY_CURRENT_USER,
-         r"SOFTWARE\Microsoft\Wisp\Pen\SysEventParameters",
-         [("HoldMode", 3)]),
-        # Disable edge swipe gestures
-        (winreg.HKEY_CURRENT_USER,
-         r"SOFTWARE\Microsoft\Windows\CurrentVersion\ImmersiveShell\EdgeUI",
-         [("DisableTLcorner", 1), ("DisableCharmsHint", 1)]),
-        (winreg.HKEY_LOCAL_MACHINE,
-         r"SOFTWARE\Policies\Microsoft\Windows\EdgeUI",
-         [("AllowEdgeSwipe", 0)]),
-    ]
-
-    for hive, key_path, values in settings:
-        try:
-            key = winreg.CreateKeyEx(hive, key_path, 0, winreg.KEY_SET_VALUE)
-            for name, val in values:
-                winreg.SetValueEx(key, name, 0, winreg.REG_DWORD, val)
-            winreg.CloseKey(key)
-        except Exception:
-            pass
-
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        user32 = ctypes.windll.user32
-
-        # Disable visual feedback via SystemParametersInfo
-        # SPI_SETCONTACTVISUALIZATION = 0x2019
-        user32.SystemParametersInfoW(0x2019, 0, 0, 0)
-        # SPI_SETGESTUREVISUALIZATION = 0x201B
-        user32.SystemParametersInfoW(0x201B, 0, 0, 0)
-
-        # Force the mouse cursor visible (touch hides it by default)
-        # ShowCursor increments/decrements a counter; keep calling until
-        # the counter is >= 0 (cursor visible).
-        for _ in range(10):
-            result = user32.ShowCursor(True)
-            if result >= 0:
-                break
-
-    except Exception:
-        pass
+    pass
 
 
 # ------------------------------

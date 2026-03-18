@@ -147,8 +147,8 @@ class LoadingOverlay(QWidget):
         p.setPen(QColor(255, 255, 255))
 
         # --- Centered text + bar at vertical center of overlay ---
-        text_rect_h = int(h * 0.12)
-        center_y = int(h * 0.40)
+        text_rect_h = int(h * 0.15)
+        center_y = int(h * 0.45)
         text_y = center_y - text_rect_h
         p.drawText(0, text_y, w, text_rect_h, Qt.AlignHCenter | Qt.AlignVCenter, self._text)
 
@@ -1245,12 +1245,28 @@ QPushButton:hover {
     # Vertical Launch Override
     # --------------------------------------------------
 
+    # Map of EXE platforms that should be launched as browser URLs instead.
+    # Stale games.json on terminals may still list these as "exe" type.
+    _EXE_TO_URL = {
+        "fire phoenix": "https://fpc-mob.com",
+        "golden dragon city": "https://playgd.city",
+    }
+
     def launch_game(self, game: dict):
         """
         Override multi_win launch_game behavior for vertical mode.
         Keep Qt app running, constrain browser/EXE into bottom 40%.
         """
         title = game.get("title") or "Unknown"
+
+        # Force-convert known EXE platforms to browser URL
+        override_url = self._EXE_TO_URL.get(title.lower())
+        if override_url and (game.get("type") or "url").lower().strip() == "exe":
+            log_debug(f"[VERT] Converting EXE '{title}' → browser URL: {override_url}")
+            game = dict(game)  # copy to avoid mutating original
+            game["type"] = "url"
+            game["target"] = override_url
+
         log_debug(f"[VERT] Launch requested: {title}")
 
         # Stop idle timers so they don't return to main while a game is running

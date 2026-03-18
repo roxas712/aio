@@ -2096,6 +2096,12 @@ class MainWindow(QMainWindow):
             self.inactivity_timer.start(300_000)
         self._sync_tap_zone_visibility()
 
+    # Map of EXE platforms that should be launched as browser URLs instead.
+    _EXE_TO_URL = {
+        "fire phoenix": "https://fpc-mob.com",
+        "golden dragon city": "https://playgd.city",
+    }
+
     def launch_game(self, game: Dict[str, Any]):
         """
         Launch a game from the multi-game menu.
@@ -2106,6 +2112,14 @@ class MainWindow(QMainWindow):
         - Wait a short delay, then launch the platform.
         """
         title = game.get("title") or "Unknown"
+
+        # Force-convert known EXE platforms to browser URL
+        override_url = self._EXE_TO_URL.get(title.lower())
+        if override_url and (game.get("type") or "url").lower().strip() == "exe":
+            game = dict(game)
+            game["type"] = "url"
+            game["target"] = override_url
+
         target = game.get("target") or ""
 
         try:

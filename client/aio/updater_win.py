@@ -433,35 +433,24 @@ def configure_system() -> None:
 
     log("[INFO] Applying system configuration...")
 
-    # --- Touch settings: keep touch ENABLED, disable visual feedback ---
-    # TouchGate=1 keeps touch digitizer ON (0 disables it entirely!)
-    # ContactVisualization=0 hides touch circles
-    # GestureVisualization=0 hides gesture indicators
-    touch_settings = [
-        (winreg.HKEY_LOCAL_MACHINE,
-         r"SOFTWARE\Microsoft\Wisp\Touch",
-         [("TouchGate", 1)]),  # 1 = touch enabled; 0 = DISABLED
-        (winreg.HKEY_CURRENT_USER,
-         r"Control Panel\Cursors",
-         [("ContactVisualization", 0), ("GestureVisualization", 0)]),
-        (winreg.HKEY_CURRENT_USER,
-         r"SOFTWARE\Microsoft\Wisp\Pen\SysEventParameters",
-         [("HoldMode", 3)]),
-        (winreg.HKEY_LOCAL_MACHINE,
-         r"SOFTWARE\Policies\Microsoft\Windows\EdgeUI",
-         [("AllowEdgeSwipe", 0)]),
-    ]
-
-    for hive, key_path, values in touch_settings:
+    # --- Touch settings: revert to Windows defaults ---
+    # Remove any previous TouchGate override so touch works natively.
+    # All games now run in browser — no need for HID-to-mouse conversion.
+    try:
+        key = winreg.OpenKeyEx(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Wisp\Touch",
+            0, winreg.KEY_SET_VALUE,
+        )
         try:
-            key = winreg.CreateKeyEx(hive, key_path, 0, winreg.KEY_SET_VALUE)
-            for name, val in values:
-                winreg.SetValueEx(key, name, 0, winreg.REG_DWORD, val)
-            winreg.CloseKey(key)
-        except Exception as e:
-            log(f"[WARN] Registry write failed ({key_path}): {e}")
+            winreg.DeleteValue(key, "TouchGate")
+        except FileNotFoundError:
+            pass
+        winreg.CloseKey(key)
+    except Exception:
+        pass
 
-    log("[INFO] Touch-to-mouse registry settings applied.")
+    log("[INFO] Touch settings reverted to defaults.")
 
     # --- Install Git LFS if not present ---
     try:
