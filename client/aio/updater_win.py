@@ -527,17 +527,11 @@ def perform_update(remote_sha: str) -> bool:
         start_services()
         return False
 
-    log("[5/8] Updating version file...")
+    log("[5/6] Updating version file...")
     write_version_file(remote_sha)
 
-    log("[6/8] Updating Python dependencies...")
+    log("[6/6] Updating Python dependencies...")
     update_pip_dependencies()
-
-    log("[7/8] Downloading LFS video files...")
-    download_lfs_videos()
-
-    log("[8/8] Applying system configuration...")
-    configure_system()
 
     log("[INFO] Restarting services...")
     start_services()
@@ -620,20 +614,7 @@ def main():
     else:
         log("[WARN] Could not check for updates (no network?). Proceeding.")
 
-    # Always apply system config (touch-to-mouse, etc.) even without update
-    try:
-        configure_system()
-    except Exception as e:
-        log(f"[WARN] System configuration failed (non-fatal): {e}")
-
-    # Launch activation FIRST so the kiosk appears immediately
     launch_activation()
-
-    # Download LFS videos in the background AFTER activation is running
-    try:
-        download_lfs_videos()
-    except Exception as e:
-        log(f"[WARN] LFS video download failed (non-fatal): {e}")
 
 
 if __name__ == "__main__":
