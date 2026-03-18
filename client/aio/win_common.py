@@ -591,6 +591,9 @@ def force_display_orientation(target_orientation: int):
     Set display orientation.
     0 = landscape (default), 1 = portrait (rotated left),
     2 = inverted landscape, 3 = portrait (rotated right).
+
+    Handles NVIDIA drivers that may report stale orientation values
+    by also checking actual pixel dimensions (width vs height).
     """
     import ctypes
     from ctypes import wintypes
@@ -605,26 +608,178 @@ def force_display_orientation(target_orientation: int):
         return False
 
     current = devmode.dmDisplayOrientation
-    if current == target_orientation:
+    cur_w = devmode.dmPelsWidth
+    cur_h = devmode.dmPelsHeight
+    want_portrait = target_orientation in (1, 3)
+    is_portrait = cur_h > cur_w
+
+    print(f"[INFO] Display: {cur_w}x{cur_h}, orientation={current}, "
+          f"target={target_orientation}, want_portrait={want_portrait}, "
+          f"is_portrait={is_portrait}")
+
+    # Check both orientation flag AND actual pixel dimensions
+    if current == target_orientation and want_portrait == is_portrait:
         print(f"[INFO] Display already at orientation {target_orientation}")
         return True
 
+    # --- Try Windows ChangeDisplaySettingsW first ---
     devmode.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT
     devmode.dmDisplayOrientation = target_orientation
 
     # Swap width/height when changing between landscape and portrait
     needs_swap = (current in (0, 2)) != (target_orientation in (0, 2))
+    # Also force swap if pixels don't match desired orientation
+    if not needs_swap and want_portrait and not is_portrait:
+        needs_swap = True
+    elif not needs_swap and not want_portrait and is_portrait:
+        needs_swap = True
+
     if needs_swap:
         devmode.dmPelsWidth, devmode.dmPelsHeight = devmode.dmPelsHeight, devmode.dmPelsWidth
 
     user32 = ctypes.WinDLL('user32', use_last_error=True)
     result = user32.ChangeDisplaySettingsW(ctypes.byref(devmode), 0)
+
     if result == 0:  # DISP_CHANGE_SUCCESSFUL
-        print(f"[INFO] Display rotated to orientation {target_orientation}")
+        print(f"[INFO] Display rotated to orientation {target_orientation} via Windows API")
+        # Verify it actually took effect
+        import time
+        time.sleep(0.5)
+        verify = _get_display_orientation()
+        if verify:
+            vw, vh = verify.dmPelsWidth, verify.dmPelsHeight
+            if want_portrait and vh > vw:
+                print(f"[INFO] Verified portrait: {vw}x{vh}")
+                return True
+            elif not want_portrait and vw > vh:
+                print(f"[INFO] Verified landscape: {vw}x{vh}")
+                return True
+            else:
+                print(f"[WARN] Rotation reported success but pixels still {vw}x{vh}")
+                # Fall through to NVIDIA method
+        else:
+            return True
+
+    print(f"[INFO] Windows API rotation returned code {result}, trying NVIDIA method...")
+
+    # --- Fallback: NVIDIA command-line rotation ---
+    success = _try_nvidia_rotation(target_orientation)
+    if success:
         return True
-    else:
-        print(f"[WARN] Display rotation failed with code {result}")
-        return False
+
+    # --- Fallback: Try all portrait orientations (1 and 3) ---
+    if want_portrait and target_orientation == 1:
+        print("[INFO] Trying orientation 3 (rotated right)...")
+        devmode2 = _get_display_orientation()
+        if devmode2:
+            devmode2.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT
+            devmode2.dmDisplayOrientation = 3
+            if devmode2.dmPelsWidth > devmode2.dmPelsHeight:
+                devmode2.dmPelsWidth, devmode2.dmPelsHeight = devmode2.dmPelsHeight, devmode2.dmPelsWidth
+            result2 = user32.ChangeDisplaySettingsW(ctypes.byref(devmode2), 0)
+            if result2 == 0:
+                print("[INFO] Display rotated to orientation 3 via Windows API")
+                return True
+
+    print(f"[WARN] All rotation methods failed")
+    return False
+
+
+def _try_nvidia_rotation(target_orientation: int) -> bool:
+    """Try rotating display using NVIDIA command-line tools."""
+    import subprocess
+
+    # Map orientation to NVIDIA rotation degrees
+    # 0=landscape(0°), 1=portrait left(90°), 2=inverted(180°), 3=portrait right(270°)
+    nvidia_rotation = {0: "0", 1: "90", 2: "180", 3: "270"}
+    degrees = nvidia_rotation.get(target_orientation, "90")
+
+    # Try nvidia-smi display rotation (works on some driver versions)
+    try:
+        # Use NVIDIA's nvcpl command line if available
+        nvcpl = r"C:\Program Files\NVIDIA Corporation\Control Panel Client\nvcplui.exe"
+        import os
+        if os.path.exists(nvcpl):
+            print(f"[INFO] NVIDIA Control Panel found at {nvcpl}")
+    except Exception:
+        pass
+
+    # Try using PowerShell with .NET to set rotation via WMI
+    try:
+        ps_cmd = f'''
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class DisplayRotation {{
+    [DllImport("user32.dll")]
+    public static extern int ChangeDisplaySettingsEx(
+        string deviceName, ref DEVMODE devMode, IntPtr hwnd,
+        uint flags, IntPtr lParam);
+    [DllImport("user32.dll")]
+    public static extern bool EnumDisplaySettings(
+        string deviceName, int modeNum, ref DEVMODE devMode);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    public struct DEVMODE {{
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmDeviceName;
+        public short dmSpecVersion;
+        public short dmDriverVersion;
+        public short dmSize;
+        public short dmDriverExtra;
+        public int dmFields;
+        public int dmPositionX;
+        public int dmPositionY;
+        public int dmDisplayOrientation;
+        public int dmDisplayFixedOutput;
+        public short dmColor;
+        public short dmDuplex;
+        public short dmYResolution;
+        public short dmTTOption;
+        public short dmCollate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmFormName;
+        public short dmLogPixels;
+        public int dmBitsPerPel;
+        public int dmPelsWidth;
+        public int dmPelsHeight;
+        public int dmDisplayFlags;
+        public int dmDisplayFrequency;
+    }}
+
+    public static void Rotate(int orientation) {{
+        DEVMODE dm = new DEVMODE();
+        dm.dmSize = (short)Marshal.SizeOf(dm);
+        EnumDisplaySettings(null, -1, ref dm);
+        int oldW = dm.dmPelsWidth;
+        int oldH = dm.dmPelsHeight;
+        bool isLandscape = oldW > oldH;
+        bool wantPortrait = (orientation == 1 || orientation == 3);
+        if (isLandscape == wantPortrait) {{
+            dm.dmPelsWidth = oldH;
+            dm.dmPelsHeight = oldW;
+        }}
+        dm.dmDisplayOrientation = orientation;
+        dm.dmFields = 0x00000080 | 0x00080000 | 0x00100000;
+        ChangeDisplaySettingsEx(null, ref dm, IntPtr.Zero, 0, IntPtr.Zero);
+    }}
+}}
+"@
+[DisplayRotation]::Rotate({target_orientation})
+'''
+        result = subprocess.run(
+            ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            print(f"[INFO] NVIDIA/PowerShell rotation applied (orientation {target_orientation})")
+            return True
+        else:
+            print(f"[WARN] PowerShell rotation failed: {result.stderr.strip()[:200]}")
+    except Exception as e:
+        print(f"[WARN] PowerShell rotation fallback failed: {e}")
+
+    return False
 
 
 def force_portrait():
