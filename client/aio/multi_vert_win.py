@@ -58,7 +58,7 @@ from win_common import (
     AIO_ROOT, PROGRAMDATA_ROOT, VERSION_FILE,
     launch_game as win_launch_game,
     get_local_ip, get_client_uuid, get_terminal_name, send_status_to_server,
-    clear_pending_restart, force_portrait, configure_touch_as_mouse,
+    clear_pending_restart, force_portrait,
 )
 
 # --- Game PID file for vertical mode ---
