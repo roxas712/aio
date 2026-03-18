@@ -586,17 +586,50 @@ def _get_display_orientation():
     return devmode
 
 
+def _get_primary_device_name() -> str:
+    """Get the device name of the primary display (e.g. '\\\\.\\DISPLAY1')."""
+    import ctypes
+    from ctypes import wintypes
+
+    class DISPLAY_DEVICE(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("DeviceName", wintypes.WCHAR * 32),
+            ("DeviceString", wintypes.WCHAR * 128),
+            ("StateFlags", wintypes.DWORD),
+            ("DeviceID", wintypes.WCHAR * 128),
+            ("DeviceKey", wintypes.WCHAR * 128),
+        ]
+
+    user32 = ctypes.WinDLL('user32', use_last_error=True)
+    DISPLAY_DEVICE_PRIMARY = 0x00000004
+
+    dev = DISPLAY_DEVICE()
+    dev.cb = ctypes.sizeof(DISPLAY_DEVICE)
+
+    idx = 0
+    while user32.EnumDisplayDevicesW(None, idx, ctypes.byref(dev), 0):
+        if dev.StateFlags & DISPLAY_DEVICE_PRIMARY:
+            name = dev.DeviceName
+            print(f"[INFO] Primary display device: {name} ({dev.DeviceString.strip()})")
+            return name
+        idx += 1
+
+    return ""
+
+
 def force_display_orientation(target_orientation: int):
     """
     Set display orientation.
     0 = landscape (default), 1 = portrait (rotated left),
     2 = inverted landscape, 3 = portrait (rotated right).
 
-    Handles NVIDIA drivers that may report stale orientation values
-    by also checking actual pixel dimensions (width vs height).
+    Uses device-specific ChangeDisplaySettingsExW which is more reliable
+    than ChangeDisplaySettingsW(NULL) on NVIDIA drivers.
     """
     import ctypes
     from ctypes import wintypes
+    import time
 
     DM_DISPLAYORIENTATION = 0x00000080
     DM_PELSWIDTH = 0x00080000
@@ -622,64 +655,195 @@ def force_display_orientation(target_orientation: int):
         print(f"[INFO] Display already at orientation {target_orientation}")
         return True
 
-    # --- Try Windows ChangeDisplaySettingsW first ---
-    devmode.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT
-    devmode.dmDisplayOrientation = target_orientation
-
-    # Swap width/height when changing between landscape and portrait
-    needs_swap = (current in (0, 2)) != (target_orientation in (0, 2))
-    # Also force swap if pixels don't match desired orientation
-    if not needs_swap and want_portrait and not is_portrait:
-        needs_swap = True
-    elif not needs_swap and not want_portrait and is_portrait:
-        needs_swap = True
-
-    if needs_swap:
-        devmode.dmPelsWidth, devmode.dmPelsHeight = devmode.dmPelsHeight, devmode.dmPelsWidth
+    # Get the actual display device name (NVIDIA requires it)
+    device_name = _get_primary_device_name()
 
     user32 = ctypes.WinDLL('user32', use_last_error=True)
-    result = user32.ChangeDisplaySettingsW(ctypes.byref(devmode), 0)
 
-    if result == 0:  # DISP_CHANGE_SUCCESSFUL
-        print(f"[INFO] Display rotated to orientation {target_orientation} via Windows API")
-        # Verify it actually took effect
-        import time
-        time.sleep(0.5)
-        verify = _get_display_orientation()
-        if verify:
-            vw, vh = verify.dmPelsWidth, verify.dmPelsHeight
-            if want_portrait and vh > vw:
-                print(f"[INFO] Verified portrait: {vw}x{vh}")
-                return True
-            elif not want_portrait and vw > vh:
-                print(f"[INFO] Verified landscape: {vw}x{vh}")
-                return True
-            else:
-                print(f"[WARN] Rotation reported success but pixels still {vw}x{vh}")
-                # Fall through to NVIDIA method
+    # Try each portrait orientation (1 and 3) since physical mounting varies
+    orientations_to_try = [target_orientation]
+    if want_portrait:
+        alt = 3 if target_orientation == 1 else 1
+        orientations_to_try.append(alt)
+
+    for try_orientation in orientations_to_try:
+        print(f"[INFO] Attempting orientation {try_orientation}...")
+
+        # Re-read current state for each attempt
+        dm = _get_display_orientation()
+        if dm is None:
+            continue
+
+        dm.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT
+        dm.dmDisplayOrientation = try_orientation
+
+        # Swap width/height if needed
+        cur_is_portrait = dm.dmPelsHeight > dm.dmPelsWidth
+        if want_portrait and not cur_is_portrait:
+            dm.dmPelsWidth, dm.dmPelsHeight = dm.dmPelsHeight, dm.dmPelsWidth
+        elif not want_portrait and cur_is_portrait:
+            dm.dmPelsWidth, dm.dmPelsHeight = dm.dmPelsHeight, dm.dmPelsWidth
+
+        # --- Method 1: ChangeDisplaySettingsExW with device name ---
+        # This is more reliable on NVIDIA than ChangeDisplaySettingsW(NULL)
+        if device_name:
+            result = user32.ChangeDisplaySettingsExW(
+                device_name,
+                ctypes.byref(dm),
+                None,   # hwnd
+                0,      # flags (CDS_UPDATEREGISTRY=1 makes it persistent)
+                None,   # lParam
+            )
+            print(f"[INFO] ChangeDisplaySettingsExW({device_name}, orient={try_orientation}) "
+                  f"returned {result}")
         else:
-            return True
+            result = user32.ChangeDisplaySettingsW(ctypes.byref(dm), 0)
+            print(f"[INFO] ChangeDisplaySettingsW(orient={try_orientation}) "
+                  f"returned {result}")
 
-    print(f"[INFO] Windows API rotation returned code {result}, trying NVIDIA method...")
-
-    # --- Fallback: NVIDIA command-line rotation ---
-    success = _try_nvidia_rotation(target_orientation)
-    if success:
-        return True
-
-    # --- Fallback: Try all portrait orientations (1 and 3) ---
-    if want_portrait and target_orientation == 1:
-        print("[INFO] Trying orientation 3 (rotated right)...")
-        devmode2 = _get_display_orientation()
-        if devmode2:
-            devmode2.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT
-            devmode2.dmDisplayOrientation = 3
-            if devmode2.dmPelsWidth > devmode2.dmPelsHeight:
-                devmode2.dmPelsWidth, devmode2.dmPelsHeight = devmode2.dmPelsHeight, devmode2.dmPelsWidth
-            result2 = user32.ChangeDisplaySettingsW(ctypes.byref(devmode2), 0)
-            if result2 == 0:
-                print("[INFO] Display rotated to orientation 3 via Windows API")
+        if result == 0:
+            time.sleep(1.0)
+            verify = _get_display_orientation()
+            if verify:
+                vw, vh = verify.dmPelsWidth, verify.dmPelsHeight
+                actual_portrait = vh > vw
+                if want_portrait == actual_portrait:
+                    print(f"[INFO] Verified: {vw}x{vh} — rotation successful")
+                    return True
+                else:
+                    print(f"[WARN] Rotation reported success but pixels={vw}x{vh}")
+            else:
                 return True
+
+    # --- Fallback: PowerShell/C# ChangeDisplaySettingsEx ---
+    print("[INFO] Trying PowerShell/C# fallback...")
+    for try_orientation in orientations_to_try:
+        if _try_nvidia_rotation(try_orientation):
+            time.sleep(1.0)
+            verify = _get_display_orientation()
+            if verify:
+                vw, vh = verify.dmPelsWidth, verify.dmPelsHeight
+                actual_portrait = vh > vw
+                if want_portrait == actual_portrait:
+                    print(f"[INFO] PowerShell rotation verified: {vw}x{vh}")
+                    return True
+            else:
+                return True
+
+    # --- Last resort: use PowerShell Set-DisplayOrientation ---
+    print("[INFO] Trying display.exe / PowerShell last resort...")
+    try:
+        import subprocess
+        # Try using PowerShell to directly set via WMI/CIM
+        ps_cmd = f'''
+$orientation = {target_orientation}
+# Try using the display CPL approach
+$sig = @'
+[DllImport("user32.dll")]
+public static extern int ChangeDisplaySettingsEx(
+    string lpszDeviceName, ref DEVMODE lpDevMode, IntPtr hwnd,
+    uint dwflags, IntPtr lParam);
+[DllImport("user32.dll")]
+public static extern bool EnumDisplayDevices(
+    string lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
+[DllImport("user32.dll")]
+public static extern bool EnumDisplaySettings(
+    string deviceName, int modeNum, ref DEVMODE devMode);
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+public struct DISPLAY_DEVICE {{
+    public int cb;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string DeviceName;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+    public string DeviceString;
+    public int StateFlags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+    public string DeviceID;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+    public string DeviceKey;
+}}
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+public struct DEVMODE {{
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string dmDeviceName;
+    public short dmSpecVersion;
+    public short dmDriverVersion;
+    public short dmSize;
+    public short dmDriverExtra;
+    public int dmFields;
+    public int dmPositionX;
+    public int dmPositionY;
+    public int dmDisplayOrientation;
+    public int dmDisplayFixedOutput;
+    public short dmColor;
+    public short dmDuplex;
+    public short dmYResolution;
+    public short dmTTOption;
+    public short dmCollate;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string dmFormName;
+    public short dmLogPixels;
+    public int dmBitsPerPel;
+    public int dmPelsWidth;
+    public int dmPelsHeight;
+    public int dmDisplayFlags;
+    public int dmDisplayFrequency;
+}}
+'@
+Add-Type -MemberDefinition $sig -Name NativeDisplay -Namespace Win32
+
+# Find primary display
+$dev = New-Object Win32.NativeDisplay+DISPLAY_DEVICE
+$dev.cb = [System.Runtime.InteropServices.Marshal]::SizeOf($dev)
+$idx = 0
+$primaryName = ""
+while ([Win32.NativeDisplay]::EnumDisplayDevices($null, $idx, [ref]$dev, 0)) {{
+    if ($dev.StateFlags -band 4) {{ $primaryName = $dev.DeviceName; break }}
+    $idx++
+}}
+if (-not $primaryName) {{ Write-Host "No primary display found"; exit 1 }}
+Write-Host "Primary: $primaryName"
+
+$dm = New-Object Win32.NativeDisplay+DEVMODE
+$dm.dmSize = [System.Runtime.InteropServices.Marshal]::SizeOf($dm)
+[Win32.NativeDisplay]::EnumDisplaySettings($primaryName, -1, [ref]$dm) | Out-Null
+
+$oldW = $dm.dmPelsWidth
+$oldH = $dm.dmPelsHeight
+$wantPortrait = ($orientation -eq 1) -or ($orientation -eq 3)
+$isLandscape = $oldW -gt $oldH
+
+if ($wantPortrait -and $isLandscape) {{
+    $dm.dmPelsWidth = $oldH
+    $dm.dmPelsHeight = $oldW
+}} elseif (-not $wantPortrait -and -not $isLandscape) {{
+    $dm.dmPelsWidth = $oldH
+    $dm.dmPelsHeight = $oldW
+}}
+$dm.dmDisplayOrientation = $orientation
+$dm.dmFields = 0x00000080 -bor 0x00080000 -bor 0x00100000
+
+# Use CDS_UPDATEREGISTRY (1) to make it persistent
+$r = [Win32.NativeDisplay]::ChangeDisplaySettingsEx($primaryName, [ref]$dm, [IntPtr]::Zero, 1, [IntPtr]::Zero)
+Write-Host "Result: $r"
+'''
+        result = subprocess.run(
+            ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=20,
+        )
+        print(f"[INFO] PowerShell last-resort output: {result.stdout.strip()}")
+        if result.returncode == 0 and "Result: 0" in result.stdout:
+            time.sleep(1.0)
+            verify = _get_display_orientation()
+            if verify:
+                vw, vh = verify.dmPelsWidth, verify.dmPelsHeight
+                if want_portrait == (vh > vw):
+                    print(f"[INFO] Last-resort rotation verified: {vw}x{vh}")
+                    return True
+    except Exception as e:
+        print(f"[WARN] Last-resort rotation failed: {e}")
 
     print(f"[WARN] All rotation methods failed")
     return False
@@ -783,8 +947,32 @@ public class DisplayRotation {{
 
 
 def force_portrait():
-    """Force primary display into portrait orientation (rotated left)."""
-    return force_display_orientation(1)
+    """Force primary display into portrait orientation.
+
+    Tries orientation 1 (rotated left) first, then 3 (rotated right).
+    Retries up to 3 times with increasing delays to handle NVIDIA driver
+    settling after boot.
+    """
+    import time
+
+    for attempt in range(3):
+        if attempt > 0:
+            wait = attempt * 2
+            print(f"[INFO] force_portrait: retry {attempt}, waiting {wait}s...")
+            time.sleep(wait)
+
+        result = force_display_orientation(1)
+        if result:
+            return True
+
+        # Verify if it actually worked despite returning False
+        dm = _get_display_orientation()
+        if dm and dm.dmPelsHeight > dm.dmPelsWidth:
+            print(f"[INFO] force_portrait: pixels are portrait despite return=False")
+            return True
+
+    print("[WARN] force_portrait: all attempts failed")
+    return False
 
 
 def force_landscape():

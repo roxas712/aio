@@ -2489,13 +2489,30 @@ if __name__ == "__main__":
     faulthandler.enable()
 
     # Force portrait BEFORE Qt starts so QApplication sees correct geometry
+    import time
     try:
-        force_portrait()
+        success = force_portrait()
+        if not success:
+            log_debug("[STARTUP] force_portrait failed — display may be sideways")
+            # Extra wait + one more attempt after NVIDIA driver settles
+            time.sleep(3)
+            force_portrait()
+    except Exception as e:
+        log_debug(f"[STARTUP] force_portrait exception: {e}")
+
+    time.sleep(1)  # Let display settle after rotation
+
+    # Final check: log actual display state before Qt starts
+    try:
+        from win_common import _get_display_orientation
+        dm = _get_display_orientation()
+        if dm:
+            log_debug(f"[STARTUP] Pre-Qt display: {dm.dmPelsWidth}x{dm.dmPelsHeight} "
+                      f"orient={dm.dmDisplayOrientation}")
+            if dm.dmPelsWidth > dm.dmPelsHeight:
+                log_debug("[STARTUP] WARNING: Display is still landscape!")
     except Exception:
         pass
-
-    import time
-    time.sleep(1)  # Let display settle after rotation
 
     # Basic DPI sanity for Windows
     os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
