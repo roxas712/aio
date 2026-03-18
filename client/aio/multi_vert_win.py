@@ -918,8 +918,8 @@ class VerticalMultiWindow(MainWindow):
         # Scale "Get Started" button for vertical and re-center it
         if hasattr(self.main_menu, 'start_btn'):
             mm_layout.setAlignment(self.main_menu.start_btn, Qt.AlignHCenter)
-            btn_w = max(260, int(screen_w * 0.35))
-            btn_h = max(55, int(game_height * 0.09))
+            btn_w = max(260, int(_init_w * 0.35))
+            btn_h = max(55, int(game_h * 0.09))
             font_sz = max(20, int(btn_h * 0.42))
             radius = btn_h // 4
             self.main_menu.start_btn.setFixedSize(btn_w, btn_h)
