@@ -2402,16 +2402,6 @@ if __name__ == "__main__":
     os.environ.setdefault("QT_SCALE_FACTOR", "1")
     os.environ.setdefault("QT_DEVICE_PIXEL_RATIO", "1")
 
-    # Tell Windows we handle DPI ourselves — ensures screen().geometry()
-    # returns true physical pixels (1080x1920) not DPI-scaled values.
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
-    except Exception:
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
-
     from PyQt5.QtCore import Qt as _Qt
     QApplication.setAttribute(_Qt.AA_DisableHighDpiScaling, True)
 
@@ -2422,9 +2412,6 @@ if __name__ == "__main__":
 
     # Log whenever the app is about to quit so we can trace unexpected exits
     app.aboutToQuit.connect(lambda: log_debug("[APP] aboutToQuit signal fired"))
-
-    # Make touch input behave as mouse (cursor visible, no ripple animation)
-    configure_touch_as_mouse()
 
     # Clear any stale restart flag so a manual reboot doesn't re-trigger
     clear_pending_restart()
