@@ -638,27 +638,34 @@ def force_landscape():
 
 
 def configure_touch_as_mouse():
-    """Configure Windows to treat touch input as mouse input.
+    """Configure Windows to treat touch input as mouse/cursor input.
 
-    Disables touch visual feedback (ripple animation) and press-and-hold
-    right-click so that touch acts like a normal mouse cursor.  This is
-    needed for game EXEs that only handle mouse input, not touch events.
+    Forces Windows to:
+    1. Show a mouse cursor that follows touch position
+    2. Disable touch visual feedback (ripple animation)
+    3. Disable press-and-hold right-click gesture
+    4. Disable edge swipe gestures
+    This is needed for game EXEs that only handle WM_MOUSE* messages.
     """
     if winreg is None:
         return
 
     settings = [
-        # Disable touch contact visualization (ripple on tap)
+        # Disable touch contact/gesture visualization (ripple on tap)
         (winreg.HKEY_CURRENT_USER,
          r"Control Panel\Cursors",
          [("ContactVisualization", 0), ("GestureVisualization", 0)]),
         # Disable press-and-hold for right-click
         (winreg.HKEY_CURRENT_USER,
-         r"SOFTWARE\Microsoft\Wisp\Touch",
-         [("TouchGate", 1)]),  # 1 = touch enabled but as mouse
-        (winreg.HKEY_CURRENT_USER,
          r"SOFTWARE\Microsoft\Wisp\Pen\SysEventParameters",
-         [("HoldMode", 3)]),  # 3 = disabled
+         [("HoldMode", 3)]),
+        # Disable edge swipe gestures
+        (winreg.HKEY_CURRENT_USER,
+         r"SOFTWARE\Microsoft\Windows\CurrentVersion\ImmersiveShell\EdgeUI",
+         [("DisableTLcorner", 1), ("DisableCharmsHint", 1)]),
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\Policies\Microsoft\Windows\EdgeUI",
+         [("AllowEdgeSwipe", 0)]),
     ]
 
     for hive, key_path, values in settings:
@@ -670,13 +677,32 @@ def configure_touch_as_mouse():
         except Exception:
             pass
 
-    # Disable "visual feedback" via SystemParametersInfo
     try:
         import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+
+        # Disable visual feedback via SystemParametersInfo
         # SPI_SETCONTACTVISUALIZATION = 0x2019
-        ctypes.windll.user32.SystemParametersInfoW(0x2019, 0, 0, 0)
+        user32.SystemParametersInfoW(0x2019, 0, 0, 0)
         # SPI_SETGESTUREVISUALIZATION = 0x201B
-        ctypes.windll.user32.SystemParametersInfoW(0x201B, 0, 0, 0)
+        user32.SystemParametersInfoW(0x201B, 0, 0, 0)
+
+        # Force the mouse cursor visible (touch hides it by default)
+        # ShowCursor increments/decrements a counter; keep calling until
+        # the counter is >= 0 (cursor visible).
+        for _ in range(10):
+            result = user32.ShowCursor(True)
+            if result >= 0:
+                break
+
+        # Ensure cursor is the normal arrow
+        IDC_ARROW = 32512
+        cursor = user32.LoadCursorW(None, IDC_ARROW)
+        if cursor:
+            user32.SetSystemCursor(cursor, 32512)
+
     except Exception:
         pass
 

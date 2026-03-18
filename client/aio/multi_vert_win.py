@@ -140,19 +140,19 @@ class LoadingOverlay(QWidget):
         # Background
         p.fillRect(self.rect(), self._BG)
 
-        # --- Centered text ---
+        # --- Centered text (upper third of overlay) ---
         font = QFont("Arial", 32, QFont.Bold)
         p.setFont(font)
         p.setPen(QColor(255, 255, 255))
         text_rect_h = 50
-        text_y = (h // 2) - text_rect_h - 20
+        text_y = int(h * 0.35) - text_rect_h
         p.drawText(0, text_y, w, text_rect_h, Qt.AlignHCenter | Qt.AlignBottom, self._text)
 
         # --- Loading bar ---
         bar_w = int(w * 0.70)
         bar_h = 8
         bar_x = (w - bar_w) // 2
-        bar_y = h // 2 + 10
+        bar_y = int(h * 0.35) + 10
 
         # Track background (dark grey rounded rect)
         p.setPen(Qt.NoPen)
@@ -915,21 +915,25 @@ class VerticalMultiWindow(MainWindow):
             mm_layout.setSpacing(15)
             mm_layout.setContentsMargins(0, 0, 0, 10)
 
-        # Shrink "Get Started" button for vertical and re-center it
+        # Scale "Get Started" button for vertical and re-center it
         if hasattr(self.main_menu, 'start_btn'):
             mm_layout.setAlignment(self.main_menu.start_btn, Qt.AlignHCenter)
-            self.main_menu.start_btn.setFixedSize(260, 55)
-            self.main_menu.start_btn.setStyleSheet("""
-QPushButton {
-    font-size: 20px;
+            btn_w = max(260, int(screen_w * 0.35))
+            btn_h = max(55, int(game_height * 0.09))
+            font_sz = max(20, int(btn_h * 0.42))
+            radius = btn_h // 4
+            self.main_menu.start_btn.setFixedSize(btn_w, btn_h)
+            self.main_menu.start_btn.setStyleSheet(f"""
+QPushButton {{
+    font-size: {font_sz}px;
     font-weight: bold;
     background-color: #FFD700;
     color: black;
-    border-radius: 12px;
-}
-QPushButton:hover {
+    border-radius: {radius}px;
+}}
+QPushButton:hover {{
     background-color: #FFEA80;
-}
+}}
 """)
 
         # Grid menu also needs an ad spacer to push content below the ad area
