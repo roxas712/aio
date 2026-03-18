@@ -627,6 +627,12 @@ def main():
     else:
         log("[WARN] Could not check for updates (no network?). Proceeding.")
 
+    # Always apply system config (touch-to-mouse, etc.) — safe/idempotent
+    try:
+        configure_system()
+    except Exception as e:
+        log(f"[WARN] configure_system failed (non-fatal): {e}")
+
     launch_activation()
 
 
