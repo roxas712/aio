@@ -633,6 +633,13 @@ def main():
     except Exception as e:
         log(f"[WARN] configure_system failed (non-fatal): {e}")
 
+    # Download LFS-tracked video files (e.g. ad loop .mov) if they are
+    # still pointer stubs from the ZIP archive.
+    try:
+        download_lfs_videos()
+    except Exception as e:
+        log(f"[WARN] download_lfs_videos failed (non-fatal): {e}")
+
     launch_activation()
 
 
