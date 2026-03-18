@@ -902,6 +902,81 @@ class MainWindow(QMainWindow):
         self._config_sync_timer.start()
         self._sync_worker = None
 
+        # Global hotkey poller — Shift+F7 works even when Chrome has focus
+        self._hotkey_timer = QTimer(self)
+        self._hotkey_timer.setInterval(200)
+        self._hotkey_timer.timeout.connect(self._poll_global_hotkey)
+        self._hotkey_timer.start()
+        self._hotkey_was_pressed = False
+
+    # --------------------------------------------------
+    # Global hotkey (Shift+F7) — works even with Chrome focused
+    # --------------------------------------------------
+
+    def _poll_global_hotkey(self):
+        """Poll GetAsyncKeyState for Shift+F7 regardless of which window has focus."""
+        import ctypes
+        VK_F7 = 0x76
+        VK_SHIFT = 0x10
+        user32 = ctypes.windll.user32
+        shift_down = user32.GetAsyncKeyState(VK_SHIFT) & 0x8000
+        f7_down = user32.GetAsyncKeyState(VK_F7) & 0x8000
+
+        if shift_down and f7_down:
+            if not self._hotkey_was_pressed:
+                self._hotkey_was_pressed = True
+                self._on_global_shift_f7()
+        else:
+            self._hotkey_was_pressed = False
+
+    def _on_global_shift_f7(self):
+        """Handle Shift+F7: bring Qt window to front and show PIN dialog."""
+        # Bring our window to front over Chrome
+        self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
+
+        # Force our window to top via Win32
+        try:
+            import win32gui
+            import win32con
+            hwnd = int(self.winId())
+            win32gui.SetWindowPos(
+                hwnd, win32con.HWND_TOPMOST,
+                0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW
+            )
+            win32gui.SetForegroundWindow(hwnd)
+            # Remove TOPMOST after bringing to front
+            win32gui.SetWindowPos(
+                hwnd, win32con.HWND_NOTOPMOST,
+                0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE
+            )
+        except Exception:
+            pass
+
+        dlg = NumericKeypadDialog("Manager / Admin Login", self)
+        if dlg.exec_() == QDialog.Accepted:
+            code = dlg.get_code()
+            if code == "12251225":
+                try:
+                    flag = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "config" / "allow_exit.flag"
+                    flag.parent.mkdir(parents=True, exist_ok=True)
+                    flag.touch()
+                    subprocess.Popen(["explorer.exe"])
+                except Exception:
+                    pass
+                app = QApplication.instance()
+                if app is not None:
+                    app.quit()
+            elif code == ADVANCED_PIN:
+                self._open_manager_page(advanced=True)
+            elif code == MANAGER_PIN:
+                self._open_manager_page(advanced=False)
+            else:
+                QMessageBox.warning(self, "Access Denied", "Invalid Pin!", QMessageBox.Ok)
+
     # --------------------------------------------------
     # Periodic config sync
     # --------------------------------------------------
