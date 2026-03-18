@@ -633,14 +633,18 @@ def main():
     except Exception as e:
         log(f"[WARN] configure_system failed (non-fatal): {e}")
 
-    # Download LFS-tracked video files (e.g. ad loop .mov) if they are
-    # still pointer stubs from the ZIP archive.
-    try:
-        download_lfs_videos()
-    except Exception as e:
-        log(f"[WARN] download_lfs_videos failed (non-fatal): {e}")
-
+    # Launch activation FIRST — don't block the kiosk boot
     launch_activation()
+
+    # Download LFS-tracked video files in the background AFTER launching.
+    # This can take minutes for large videos (~750MB) so must not block boot.
+    import threading
+    def _bg_lfs():
+        try:
+            download_lfs_videos()
+        except Exception as e:
+            log(f"[WARN] download_lfs_videos failed (non-fatal): {e}")
+    threading.Thread(target=_bg_lfs, daemon=True).start()
 
 
 if __name__ == "__main__":
