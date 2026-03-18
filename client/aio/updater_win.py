@@ -552,6 +552,19 @@ def launch_activation() -> None:
         log(f"[ERROR] activation_win.py not found at {activation_script}")
         return
 
+    # --- Debug / maintenance mode ---
+    # If maintenance.flag exists, open PowerShell for admin access instead
+    maint_flag = PROGRAMDATA_ROOT / "config" / "maintenance.flag"
+    if maint_flag.exists():
+        log("[INFO] Maintenance flag detected — opening PowerShell for admin")
+        try:
+            maint_flag.unlink(missing_ok=True)  # one-shot: remove flag
+            subprocess.Popen(["powershell.exe"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+            subprocess.Popen(["explorer.exe"])
+        except Exception as e:
+            log(f"[WARN] Failed to open maintenance shell: {e}")
+        return  # Don't launch kiosk in maintenance mode
+
     cmd = [str(PYTHON), str(activation_script)]
     log(f"[INFO] Launching activation: {' '.join(cmd)}")
     try:
