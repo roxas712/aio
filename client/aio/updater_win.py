@@ -433,11 +433,14 @@ def configure_system() -> None:
 
     log("[INFO] Applying system configuration...")
 
-    # --- Touch-to-mouse: disable touch visual feedback & force mouse mode ---
+    # --- Touch settings: keep touch ENABLED, disable visual feedback ---
+    # TouchGate=1 keeps touch digitizer ON (0 disables it entirely!)
+    # ContactVisualization=0 hides touch circles
+    # GestureVisualization=0 hides gesture indicators
     touch_settings = [
         (winreg.HKEY_LOCAL_MACHINE,
          r"SOFTWARE\Microsoft\Wisp\Touch",
-         [("TouchGate", 0)]),  # 0 = force touch through mouse pipeline
+         [("TouchGate", 1)]),  # 1 = touch enabled; 0 = DISABLED
         (winreg.HKEY_CURRENT_USER,
          r"Control Panel\Cursors",
          [("ContactVisualization", 0), ("GestureVisualization", 0)]),
