@@ -55,6 +55,8 @@ from win_common import (
     launch_game,
     sync_config_from_server,
     persist_synced_config,
+    force_portrait,
+    force_landscape,
 )
 
 # ------------------------------------------------------------------------------
@@ -68,6 +70,9 @@ SINGLE_GAME_FILE = PROGRAMDATA_ROOT / "config" / "single_game.json"
 
 # Chrome profile directory for single mode
 CHROME_PROFILE_DIR = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "aio" / "chrome_profile_single"
+
+# Games that require portrait (vertical) orientation
+PORTRAIT_TITLES = ["great balls of fire", "fortune 2 go"]
 
 
 # ------------------------------------------------------------------------------
@@ -801,20 +806,47 @@ class MainWindow(QMainWindow):
         gtype = (self.selected_game.get("type") or "").lower().strip()
         target = self.selected_game.get("target") or ""
         title = self.selected_game.get("title") or "Unknown"
+        orientation = (self.selected_game.get("orientation") or "").lower().strip()
+
+        # Force portrait for vertical games
+        self._is_portrait = (
+            orientation == "vertical"
+            or title.lower() in PORTRAIT_TITLES
+        )
+        if self._is_portrait:
+            force_portrait()
 
         if gtype == "url" and target:
-            self.game_view = GameView(self.return_to_main)
-            self.stack.addWidget(self.game_view)
-
             log_activity_local(title)
             send_click_to_server(title)
             try:
                 send_status_to_server("in_play")
             except Exception:
                 pass
-            self.game_view.load_url_game(target)
-            self.stack.setCurrentWidget(self.game_view)
-            self.home_page = self.game_view
+
+            # Launch in Chrome kiosk mode (fullscreen, no UI chrome)
+            self._launch_chrome_kiosk(target, title)
+
+            # Show info screen behind the browser
+            wrapper = QWidget()
+            vbox = QVBoxLayout(wrapper)
+            vbox.setContentsMargins(40, 40, 40, 40)
+            vbox.setSpacing(20)
+            info = QLabel(
+                f"{title} is running.\n\n"
+                f"Press Shift+F7 to access kiosk controls."
+            )
+            info.setAlignment(Qt.AlignCenter)
+            info.setStyleSheet(
+                "color: white; font-size: 24px; "
+                "background-color: black; border-radius: 10px; padding: 20px;"
+            )
+            vbox.addStretch()
+            vbox.addWidget(info, alignment=Qt.AlignCenter)
+            vbox.addStretch()
+            self.stack.addWidget(wrapper)
+            self.stack.setCurrentWidget(wrapper)
+            self.home_page = wrapper
 
         elif gtype == "exe" and target:
             log_activity_local(title)
@@ -902,6 +934,57 @@ class MainWindow(QMainWindow):
         if result.get("changed_terminal_type") or result.get("changed_games"):
             persist_synced_config(result)
             self._restart_kiosk()
+
+    def _launch_chrome_kiosk(self, url, title):
+        """Launch game URL in Chrome kiosk mode (fullscreen, no browser UI)."""
+        chrome_candidates = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+        chrome_path = None
+        for path in chrome_candidates:
+            if os.path.exists(path):
+                chrome_path = path
+                break
+
+        if not chrome_path:
+            return
+
+        # Kill leftover Chrome so flags apply fresh
+        try:
+            subprocess.run(
+                ["taskkill", "/IM", "chrome.exe", "/F"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            import time; time.sleep(1)
+        except Exception:
+            pass
+
+        try:
+            CHROME_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        common_flags = [
+            f"--user-data-dir={CHROME_PROFILE_DIR}",
+            "--no-first-run",
+            "--disable-popup-blocking",
+            "--disable-translate",
+            "--disable-features=DesktopPWAs,WebAppInstallation,PwaInstall",
+            "--autoplay-policy=no-user-gesture-required",
+            "--noerrdialogs",
+            "--disable-session-crashed-bubble",
+        ]
+
+        try:
+            self._chrome_proc = subprocess.Popen([
+                chrome_path,
+                "--kiosk",
+                *common_flags,
+                url,
+            ])
+        except Exception:
+            pass
 
     def _restart_kiosk(self):
         """Restart kiosk pipeline via activation_win.py."""
