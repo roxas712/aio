@@ -74,7 +74,7 @@ def _get_github_headers() -> dict:
 # ---------------------------------------------------------------------------
 
 SERVICES = ["AIOWatchdog", "AIOAgent"]
-PIP_PACKAGES = ["PyQt5", "PyQtWebEngine", "psutil", "requests", "websockets", "pywin32"]
+PIP_PACKAGES = ["PyQt5", "PyQtWebEngine", "psutil", "requests", "websockets", "pywin32", "opencv-python"]
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +372,116 @@ def update_pip_dependencies() -> None:
         log(f"[WARN] pip install failed (non-fatal): {e}")
 
 
+# LFS video files to download directly from GitHub raw content
+# Format: (repo_path, local_dest)
+LFS_VIDEO_FILES = [
+    ("client/aio/vids/AIO_upper-loop.mov", KIOSK_DIR / "vids" / "AIO_upper-loop.mov"),
+]
+
+RAW_CONTENT_URL = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/raw/refs/heads/{BRANCH}"
+
+
+def download_lfs_videos() -> None:
+    """Download LFS-tracked video files directly from GitHub raw content."""
+    for repo_path, local_dest in LFS_VIDEO_FILES:
+        try:
+            # Skip if file already exists and is > 1MB (not a pointer)
+            if local_dest.exists() and local_dest.stat().st_size > 1_000_000:
+                log(f"[INFO] LFS video already present: {local_dest.name} "
+                    f"({local_dest.stat().st_size // 1_000_000}MB)")
+                continue
+
+            # Check if deployed file is an LFS pointer (< 1KB text)
+            if local_dest.exists() and local_dest.stat().st_size < 1024:
+                log(f"[INFO] Found LFS pointer for {local_dest.name}, downloading actual file...")
+
+            url = f"{RAW_CONTENT_URL}/{repo_path}"
+            log(f"[INFO] Downloading LFS video: {repo_path}...")
+
+            local_dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp_dest = local_dest.with_suffix(".tmp")
+
+            resp = requests.get(url, headers=_get_github_headers(), stream=True, timeout=600)
+            resp.raise_for_status()
+
+            total = int(resp.headers.get("content-length", 0))
+            downloaded = 0
+            with tmp_dest.open("wb") as f:
+                for chunk in resp.iter_content(chunk_size=262144):  # 256KB chunks
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+
+            if downloaded > 1_000_000:
+                tmp_dest.rename(local_dest)
+                log(f"[INFO] Downloaded {local_dest.name} ({downloaded // 1_000_000}MB)")
+            else:
+                log(f"[WARN] Downloaded file too small ({downloaded} bytes), may be LFS pointer")
+                tmp_dest.unlink(missing_ok=True)
+
+        except Exception as e:
+            log(f"[WARN] Failed to download LFS video {repo_path}: {e}")
+
+
+def configure_system() -> None:
+    """Apply one-time system configuration for kiosk terminals.
+
+    - Touch-to-mouse: disable HID touch visual feedback, force cursor visible
+    - Git LFS: install if not present (for large video files)
+    """
+    import winreg
+
+    log("[INFO] Applying system configuration...")
+
+    # --- Touch-to-mouse: disable touch visual feedback & force mouse mode ---
+    touch_settings = [
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\Microsoft\Wisp\Touch",
+         [("TouchGate", 0)]),  # 0 = force touch through mouse pipeline
+        (winreg.HKEY_CURRENT_USER,
+         r"Control Panel\Cursors",
+         [("ContactVisualization", 0), ("GestureVisualization", 0)]),
+        (winreg.HKEY_CURRENT_USER,
+         r"SOFTWARE\Microsoft\Wisp\Pen\SysEventParameters",
+         [("HoldMode", 3)]),
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\Policies\Microsoft\Windows\EdgeUI",
+         [("AllowEdgeSwipe", 0)]),
+    ]
+
+    for hive, key_path, values in touch_settings:
+        try:
+            key = winreg.CreateKeyEx(hive, key_path, 0, winreg.KEY_SET_VALUE)
+            for name, val in values:
+                winreg.SetValueEx(key, name, 0, winreg.REG_DWORD, val)
+            winreg.CloseKey(key)
+        except Exception as e:
+            log(f"[WARN] Registry write failed ({key_path}): {e}")
+
+    log("[INFO] Touch-to-mouse registry settings applied.")
+
+    # --- Install Git LFS if not present ---
+    try:
+        result = subprocess.run(
+            ["git", "lfs", "version"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            log(f"[INFO] Git LFS already installed: {result.stdout.strip()}")
+        else:
+            raise FileNotFoundError
+    except Exception:
+        log("[INFO] Installing Git LFS...")
+        try:
+            subprocess.run(
+                ["git", "lfs", "install"],
+                capture_output=True, text=True, timeout=30,
+            )
+            log("[INFO] Git LFS installed.")
+        except Exception as e:
+            log(f"[WARN] Git LFS install failed (non-fatal): {e}")
+
+
 # ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
@@ -417,11 +527,17 @@ def perform_update(remote_sha: str) -> bool:
         start_services()
         return False
 
-    log("[5/6] Updating version file...")
+    log("[5/8] Updating version file...")
     write_version_file(remote_sha)
 
-    log("[6/6] Updating Python dependencies...")
+    log("[6/8] Updating Python dependencies...")
     update_pip_dependencies()
+
+    log("[7/8] Downloading LFS video files...")
+    download_lfs_videos()
+
+    log("[8/8] Applying system configuration...")
+    configure_system()
 
     log("[INFO] Restarting services...")
     start_services()
@@ -503,6 +619,18 @@ def main():
         log("[INFO] Already up to date.")
     else:
         log("[WARN] Could not check for updates (no network?). Proceeding.")
+
+    # Always apply system config (touch-to-mouse, etc.) even without update
+    try:
+        configure_system()
+    except Exception as e:
+        log(f"[WARN] System configuration failed (non-fatal): {e}")
+
+    # Ensure LFS videos are downloaded even if no code update
+    try:
+        download_lfs_videos()
+    except Exception as e:
+        log(f"[WARN] LFS video download failed (non-fatal): {e}")
 
     launch_activation()
 
