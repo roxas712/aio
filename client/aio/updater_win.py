@@ -452,11 +452,13 @@ def configure_system() -> None:
 
     log("[INFO] Touch settings reverted to defaults.")
 
-    # --- Reset touch calibration data ---
+    # --- Reset touch calibration + disable/re-enable touch device ---
     # Stale calibration from a previous display rotation can cause
-    # inverted touch axes (right→up, left→down).  Removing the
-    # calibration data and restarting the touch service forces Windows
-    # to re-derive coordinates from the current display orientation.
+    # inverted touch axes (right→up, left→down).  We:
+    #   1. Remove stale calibration data from registry
+    #   2. Disable and re-enable the touch device (forces Windows to
+    #      re-derive coordinate mapping from current display orientation)
+    #   3. Restart the touch input service
     try:
         for digimon_idx in ("0", "1", "2"):
             key_path = rf"SOFTWARE\Microsoft\Wisp\Pen\Digimon\{digimon_idx}"
@@ -472,12 +474,28 @@ def configure_system() -> None:
                 winreg.CloseKey(key)
             except Exception:
                 pass
-        # Restart the touch input service so it picks up fresh calibration
-        subprocess.run(
-            ["powershell", "-Command", "Restart-Service TabletInputService -Force -ErrorAction SilentlyContinue"],
-            capture_output=True, timeout=10,
+
+        # Disable and re-enable touch device to force coordinate re-mapping
+        ps_touch_reset = '''
+$touch = Get-PnpDevice | Where-Object { $_.FriendlyName -like "*touch*" -and $_.Status -eq "OK" }
+if ($touch) {
+    Write-Host "Resetting touch device: $($touch.FriendlyName)"
+    $touch | Disable-PnpDevice -Confirm:$false
+    Start-Sleep -Seconds 3
+    $touch | Enable-PnpDevice -Confirm:$false
+    Write-Host "Touch device reset complete"
+} else {
+    Write-Host "No touch device found"
+}
+Restart-Service TabletInputService -Force -ErrorAction SilentlyContinue
+'''
+        result = subprocess.run(
+            ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_touch_reset],
+            capture_output=True, text=True, timeout=30,
         )
-        log("[INFO] Touch input service restarted.")
+        log(f"[INFO] Touch reset: {result.stdout.strip()}")
+        if result.stderr.strip():
+            log(f"[WARN] Touch reset stderr: {result.stderr.strip()[:200]}")
     except Exception as e:
         log(f"[WARN] Touch calibration reset failed (non-fatal): {e}")
 
