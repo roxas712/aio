@@ -626,13 +626,14 @@ def main():
     except Exception as e:
         log(f"[WARN] System configuration failed (non-fatal): {e}")
 
-    # Ensure LFS videos are downloaded even if no code update
+    # Launch activation FIRST so the kiosk appears immediately
+    launch_activation()
+
+    # Download LFS videos in the background AFTER activation is running
     try:
         download_lfs_videos()
     except Exception as e:
         log(f"[WARN] LFS video download failed (non-fatal): {e}")
-
-    launch_activation()
 
 
 if __name__ == "__main__":

@@ -697,12 +697,6 @@ def configure_touch_as_mouse():
             if result >= 0:
                 break
 
-        # Ensure cursor is the normal arrow
-        IDC_ARROW = 32512
-        cursor = user32.LoadCursorW(None, IDC_ARROW)
-        if cursor:
-            user32.SetSystemCursor(cursor, 32512)
-
     except Exception:
         pass
 
