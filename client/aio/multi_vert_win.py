@@ -431,7 +431,15 @@ class AdLoopWidget(QWidget):
         rgb = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
         # Use strides for correct byte alignment; .copy() ensures data ownership
         qimg = QImage(rgb.data, w, h, rgb.strides[0], QImage.Format_RGB888).copy()
-        self._label.setPixmap(QPixmap.fromImage(qimg))
+        pix = QPixmap.fromImage(qimg)
+        self._label.setPixmap(pix)
+        # Mirror to TOPMOST ad overlay if active (for EXE game overlay)
+        mirror = getattr(self, '_topmost_mirror_label', None)
+        if mirror:
+            try:
+                mirror.setPixmap(pix)
+            except Exception:
+                pass
 
     def _show_image(self, path: Path):
         """Display a static image ad."""
@@ -1728,73 +1736,48 @@ QPushButton:hover {
             self._reparent_timer.start()
 
         else:
-            # --- EXE path: reparent to break D3D exclusive fullscreen ---
+            # --- EXE path: NO reparenting (breaks input) ---
+            # Instead, let the game run as top-level and use TOPMOST ad overlay
+            # (same approach as browser games). The game stays fullscreen and
+            # interactive; we just cover the top 60% with ads.
+            log_debug(f"[VERT] EXE game — using TOPMOST overlay (no reparent)")
+
             if game_hwnd:
                 try:
-                    our_hwnd = int(self.winId())
-                    log_debug(f"[VERT] Reparenting game 0x{game_hwnd:08X} into Qt 0x{our_hwnd:08X}")
-
-                    ctypes.windll.user32.SetParent(game_hwnd, our_hwnd)
-
-                    style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_STYLE)
-                    style = style & ~(win32con.WS_POPUP | win32con.WS_CAPTION |
-                                      win32con.WS_THICKFRAME | win32con.WS_SYSMENU |
-                                      win32con.WS_MINIMIZEBOX | win32con.WS_MAXIMIZEBOX)
-                    style = style | win32con.WS_CHILD | win32con.WS_VISIBLE
-                    win32gui.SetWindowLong(game_hwnd, win32con.GWL_STYLE, style)
-
-                    ex_style = win32gui.GetWindowLong(game_hwnd, win32con.GWL_EXSTYLE)
-                    ex_style &= ~(win32con.WS_EX_TOPMOST | win32con.WS_EX_DLGMODALFRAME)
-                    win32gui.SetWindowLong(game_hwnd, win32con.GWL_EXSTYLE, ex_style)
-
-                    win32gui.MoveWindow(game_hwnd, 0, ad_height, screen_w, game_height, True)
-
-                    try:
-                        win32gui.SetForegroundWindow(game_hwnd)
-                        win32gui.SetFocus(game_hwnd)
-                    except Exception:
-                        pass
-
-                    rect = win32gui.GetWindowRect(game_hwnd)
-                    log_debug(f"[VERT] Game reparented, rect={rect} "
-                              f"(target child: 0,{ad_height},{screen_w},{ad_height + game_height})")
+                    # Try to position game in bottom 40% (some games allow it)
+                    self._strip_chrome_frame(game_hwnd)
+                    win32gui.SetWindowPos(
+                        game_hwnd, None,
+                        0, ad_height, screen_w, game_height,
+                        win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED
+                    )
+                    log_debug(f"[VERT] EXE positioned at 0,{ad_height} "
+                              f"size {screen_w}x{game_height}")
                 except Exception as e:
-                    log_debug(f"[VERT] Reparent failed: {e}")
+                    log_debug(f"[VERT] EXE positioning failed (game may be fullscreen): {e}")
 
-            # Show the in-app ad overlay (above the reparented child in Z-order)
-            if self.ad_overlay:
-                self.ad_overlay.show()
-                self.ad_overlay.raise_()
-                self.ad_overlay.resume()
+                # Give focus to the game window
+                try:
+                    win32gui.SetForegroundWindow(game_hwnd)
+                except Exception:
+                    pass
 
-            # Raise neon divider above the game
-            if hasattr(self, '_neon_divider') and self._neon_divider:
-                self._neon_divider.raise_()
-
-            # Clean up any previous topmost windows
-            for attr in ('_topmost_ad', '_topmost_return_btn'):
-                w = getattr(self, attr, None)
-                if w:
-                    try:
-                        w.hide()
-                        w.deleteLater()
-                    except Exception:
-                        pass
-                    setattr(self, attr, None)
+            # Create TOPMOST ad overlay window covering top 60%
+            self._show_topmost_ad_overlay(screen_w, ad_height)
 
             # Hide loading overlay
             if hasattr(self, '_loading_overlay'):
                 self._loading_overlay.hide_loading()
 
-            # Show return button as TOPMOST window
+            # Return button as TOPMOST window
             self._show_landscape_return_button_topmost(screen_w, ad_height)
 
-            # Keep re-positioning the game for a few seconds (it may fight back)
+            # Keep repositioning game (it may try to go fullscreen)
             self._reparent_count = 0
             self._reparent_params = (game_hwnd, ad_height, screen_w, game_height)
             self._reparent_timer = QTimer(self)
             self._reparent_timer.setInterval(500)
-            self._reparent_timer.timeout.connect(self._reassert_reparent)
+            self._reparent_timer.timeout.connect(self._reassert_exe_position)
             self._reparent_timer.start()
 
     def _reassert_reparent(self):
@@ -1831,6 +1814,83 @@ QPushButton:hover {
 
             if self.ad_overlay:
                 self.ad_overlay.raise_()
+        except Exception:
+            pass
+
+    def _show_topmost_ad_overlay(self, screen_w, ad_height):
+        """Create a separate TOPMOST window for ads that covers the top 60%.
+
+        Used for EXE games where the game runs as a top-level window.
+        The ad overlay must be a separate TOPMOST window to sit above the game.
+        """
+        # Clean up previous
+        old = getattr(self, '_topmost_ad', None)
+        if old:
+            try:
+                old.hide()
+                old.deleteLater()
+            except Exception:
+                pass
+
+        ad_win = QWidget(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        ad_win.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        ad_win.setStyleSheet("background-color: black;")
+        ad_win.setGeometry(0, 0, screen_w, ad_height)
+
+        # Create an ad loop inside the TOPMOST window
+        from PyQt5.QtWidgets import QVBoxLayout
+        layout = QVBoxLayout(ad_win)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        ad_label = QLabel(ad_win)
+        ad_label.setAlignment(Qt.AlignCenter)
+        ad_label.setStyleSheet("background-color: black;")
+        layout.addWidget(ad_label)
+
+        ad_win.show()
+        self._topmost_ad = ad_win
+        self._make_overlay_topmost(ad_win)
+
+        # Mirror the main ad overlay's video frames into this TOPMOST window
+        if self.ad_overlay and hasattr(self.ad_overlay, '_label'):
+            self.ad_overlay._topmost_mirror_label = ad_label
+            self.ad_overlay.resume()
+
+        log_debug(f"[VERT] TOPMOST ad overlay created: {screen_w}x{ad_height}")
+
+    def _reassert_exe_position(self):
+        """Keep repositioning EXE game window in bottom 40% (no reparenting)."""
+        self._reparent_count += 1
+        if self._reparent_count > 30:  # 15 seconds
+            self._reparent_timer.stop()
+            return
+
+        game_hwnd, ad_height, screen_w, game_height = self._reparent_params
+        if not game_hwnd:
+            self._reparent_timer.stop()
+            return
+
+        try:
+            if not win32gui.IsWindow(game_hwnd):
+                self._reparent_timer.stop()
+                return
+
+            # Check if game has moved/resized
+            rect = win32gui.GetWindowRect(game_hwnd)
+            cur_x, cur_y, cur_r, cur_b = rect
+            cur_w = cur_r - cur_x
+            cur_h = cur_b - cur_y
+            if cur_x != 0 or cur_y != ad_height or cur_w != screen_w or cur_h != game_height:
+                win32gui.SetWindowPos(
+                    game_hwnd, None,
+                    0, ad_height, screen_w, game_height,
+                    win32con.SWP_NOZORDER | win32con.SWP_FRAMECHANGED
+                )
+
+            # Re-assert TOPMOST on our ad overlay
+            topmost_ad = getattr(self, '_topmost_ad', None)
+            if topmost_ad:
+                self._make_overlay_topmost(topmost_ad)
         except Exception:
             pass
 
