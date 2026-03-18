@@ -637,6 +637,50 @@ def force_landscape():
     return force_display_orientation(0)
 
 
+def configure_touch_as_mouse():
+    """Configure Windows to treat touch input as mouse input.
+
+    Disables touch visual feedback (ripple animation) and press-and-hold
+    right-click so that touch acts like a normal mouse cursor.  This is
+    needed for game EXEs that only handle mouse input, not touch events.
+    """
+    if winreg is None:
+        return
+
+    settings = [
+        # Disable touch contact visualization (ripple on tap)
+        (winreg.HKEY_CURRENT_USER,
+         r"Control Panel\Cursors",
+         [("ContactVisualization", 0), ("GestureVisualization", 0)]),
+        # Disable press-and-hold for right-click
+        (winreg.HKEY_CURRENT_USER,
+         r"SOFTWARE\Microsoft\Wisp\Touch",
+         [("TouchGate", 1)]),  # 1 = touch enabled but as mouse
+        (winreg.HKEY_CURRENT_USER,
+         r"SOFTWARE\Microsoft\Wisp\Pen\SysEventParameters",
+         [("HoldMode", 3)]),  # 3 = disabled
+    ]
+
+    for hive, key_path, values in settings:
+        try:
+            key = winreg.CreateKeyEx(hive, key_path, 0, winreg.KEY_SET_VALUE)
+            for name, val in values:
+                winreg.SetValueEx(key, name, 0, winreg.REG_DWORD, val)
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+
+    # Disable "visual feedback" via SystemParametersInfo
+    try:
+        import ctypes
+        # SPI_SETCONTACTVISUALIZATION = 0x2019
+        ctypes.windll.user32.SystemParametersInfoW(0x2019, 0, 0, 0)
+        # SPI_SETGESTUREVISUALIZATION = 0x201B
+        ctypes.windll.user32.SystemParametersInfoW(0x201B, 0, 0, 0)
+    except Exception:
+        pass
+
+
 # ------------------------------
 # Game launching helpers
 # ------------------------------

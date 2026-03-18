@@ -58,7 +58,7 @@ from win_common import (
     AIO_ROOT, PROGRAMDATA_ROOT, VERSION_FILE,
     launch_game as win_launch_game,
     get_local_ip, get_client_uuid, get_terminal_name, send_status_to_server,
-    clear_pending_restart, force_portrait,
+    clear_pending_restart, force_portrait, configure_touch_as_mouse,
 )
 
 # --- Game PID file for vertical mode ---
@@ -2418,6 +2418,9 @@ if __name__ == "__main__":
 
     # Log whenever the app is about to quit so we can trace unexpected exits
     app.aboutToQuit.connect(lambda: log_debug("[APP] aboutToQuit signal fired"))
+
+    # Make touch input behave as mouse (cursor visible, no ripple animation)
+    configure_touch_as_mouse()
 
     # Clear any stale restart flag so a manual reboot doesn't re-trigger
     clear_pending_restart()
